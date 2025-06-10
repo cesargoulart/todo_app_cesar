@@ -15,17 +15,29 @@ class ToDoListScreen extends StatefulWidget {
 
 class _ToDoListScreenState extends State<ToDoListScreen> {
   final TextEditingController _textFieldController = TextEditingController();
-  final StorageService _storageService = StorageService();
-  List<ToDoItem> _todos = [];
+  final StorageService _storageService = StorageService();  List<ToDoItem> _todos = [];
   bool _isLoading = true;
   bool _showCompleted = true;
+  bool _hideFutureTasks = false;
 
   List<ToDoItem> get _filteredTodos {
-    if (_showCompleted) {
-      return _todos;
-    } else {
-      return _todos.where((todo) => !todo.isDone).toList();
+    List<ToDoItem> filtered = _todos;
+    
+    // Filter by completion status
+    if (!_showCompleted) {
+      filtered = filtered.where((todo) => !todo.isDone).toList();
     }
+    
+    // Filter by future deadlines (more than 3 days away)
+    if (_hideFutureTasks) {
+      final threeDaysFromNow = DateTime.now().add(const Duration(days: 3));
+      filtered = filtered.where((todo) {
+        // Keep tasks without due dates or tasks due within 3 days
+        return todo.dueDate == null || todo.dueDate!.isBefore(threeDaysFromNow);
+      }).toList();
+    }
+    
+    return filtered;
   }
 
   @override
@@ -57,15 +69,45 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
     });
     _saveTodosToStorage();
   }
-
   void _deleteToDoItem(ToDoItem todo) {
-    setState(() {
-      _todos.removeWhere((item) => item.id == todo.id);
-    });
-    _saveTodosToStorage();
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Delete Task'),
+          content: Text('Are you sure you want to delete "${todo.title}"?'),
+          actions: [
+            TextButton(
+              child: const Text('CANCEL'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: const Text('DELETE'),
+              onPressed: () {
+                setState(() {
+                  _todos.removeWhere((item) => item.id == todo.id);
+                });
+                _saveTodosToStorage();
+                Navigator.of(context).pop();
+                
+                // Show a snackbar confirmation
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Task "${todo.title}" deleted'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
-  void _showAddOrEditToDoDialog({ToDoItem? existingTodo}) {
+  void _showAddOrEditToDoDialog({ToDoItem? existingTodo, bool isSubtask = false, ToDoItem? parentTodo}) {
     final bool isEditing = existingTodo != null;
     final String dialogTitle = isEditing ? 'Edit To-Do' : 'Add a new To-Do';
     final String saveButtonText = isEditing ? 'SAVE' : 'ADD';
@@ -141,16 +183,20 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                   child: Text(saveButtonText),
                   onPressed: () {
                     final newTitle = _textFieldController.text;
-                    if (newTitle.isNotEmpty) {
-                      setState(() { // Use a single setState call
+                    if (newTitle.isNotEmpty) {                      setState(() { // Use a single setState call
                         if (isEditing) {
-                          existingTodo!.title = newTitle;
+                          existingTodo.title = newTitle;
                           existingTodo.dueDate = selectedDueDate;
                         } else {
-                          _todos.add(ToDoItem(
+                          final newTodo = ToDoItem(
                             title: newTitle,
                             dueDate: selectedDueDate,
-                          ));
+                          );
+                          if (isSubtask && parentTodo != null) {
+                            parentTodo.addSubtask(newTodo);
+                          } else {
+                            _todos.add(newTodo);
+                          }
                         }
                       });
                       _saveTodosToStorage();
@@ -167,6 +213,59 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
     );
   }
 
+  // Subtask management methods
+  void _addSubtask(ToDoItem parentTodo) {
+    _showAddOrEditToDoDialog(isSubtask: true, parentTodo: parentTodo);
+  }
+
+  void _toggleSubtaskStatus(ToDoItem parentTodo, ToDoItem subtask) {
+    setState(() {
+      subtask.isDone = !subtask.isDone;
+    });
+    _saveTodosToStorage();
+  }
+
+  void _deleteSubtask(ToDoItem parentTodo, ToDoItem subtask) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Delete Subtask'),
+          content: Text('Are you sure you want to delete "${subtask.title}"?'),
+          actions: [
+            TextButton(
+              child: const Text('CANCEL'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: const Text('DELETE'),
+              onPressed: () {
+                setState(() {
+                  parentTodo.removeSubtask(subtask.id);
+                });
+                _saveTodosToStorage();
+                Navigator.of(context).pop();
+                
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Subtask "${subtask.title}" deleted'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _editSubtask(ToDoItem parentTodo, ToDoItem subtask) {
+    _showAddOrEditToDoDialog(existingTodo: subtask, isSubtask: true, parentTodo: parentTodo);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
@@ -181,8 +280,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
               final newThemeMode = isDarkMode ? ThemeMode.light : ThemeMode.dark;
               widget.onThemeModeChanged(newThemeMode);
             },
-          ),
-          IconButton(
+          ),          IconButton(
             icon: Icon(_showCompleted ? Icons.visibility_off : Icons.visibility),
             tooltip: _showCompleted ? 'Hide completed tasks' : 'Show completed tasks',
             onPressed: () {
@@ -191,19 +289,31 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
               });
             },
           ),
+          IconButton(
+            icon: Icon(_hideFutureTasks ? Icons.event_available : Icons.event_busy),
+            tooltip: _hideFutureTasks ? 'Show future tasks' : 'Hide tasks due in 3+ days',
+            onPressed: () {
+              setState(() {
+                _hideFutureTasks = !_hideFutureTasks;
+              });
+            },
+          ),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView.builder(
-              itemCount: _filteredTodos.length,
-              itemBuilder: (context, index) {
+              itemCount: _filteredTodos.length,              itemBuilder: (context, index) {
                 final todo = _filteredTodos[index];
                 return ToDoListItemWidget(
                   todo: todo,
                   onStatusChanged: () => _toggleToDoStatus(todo),
                   onDismissed: () => _deleteToDoItem(todo),
                   onEdit: () => _showAddOrEditToDoDialog(existingTodo: todo),
+                  onAddSubtask: _addSubtask,
+                  onSubtaskStatusChanged: _toggleSubtaskStatus,
+                  onSubtaskDeleted: _deleteSubtask,
+                  onSubtaskEdit: _editSubtask,
                 );
               },
             ),
