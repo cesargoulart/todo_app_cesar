@@ -43,7 +43,7 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> {
 
     return Column(
       children: [        Dismissible(
-          key: Key(todo.id),
+          key: Key(todo.id ?? 'temp_${todo.hashCode}'),
           onDismissed: (direction) => widget.onDismissed(),
           background: Container(
             color: Colors.red,

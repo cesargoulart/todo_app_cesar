@@ -2,8 +2,17 @@
 
 import 'package:flutter/material.dart';
 import '../screens/todo_list_screen.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'supabase_credentials.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  await Supabase.initialize(
+    url: supabaseUrl,
+    anonKey: supabaseAnnonKey,
+  );
+  
   runApp(const MyApp());
 }
 

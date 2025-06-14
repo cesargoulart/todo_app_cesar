@@ -1,49 +1,39 @@
-// lib/services/storage_service.dart
-
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/todo_item.dart';
 
 class StorageService {
-  // The key we'll use to store our to-do list in shared_preferences.
-  static const String _todosKey = 'todos';
-
-  // Method to save the list of ToDoItems.
-  Future<void> saveTodos(List<ToDoItem> todos) async {
-    // 1. Get the instance of SharedPreferences.
-    final prefs = await SharedPreferences.getInstance();
-
-    // 2. Convert the list of ToDoItem objects to a list of JSON maps.
-    List<Map<String, dynamic>> todosAsJson =
-        todos.map((todo) => todo.toJson()).toList();
-
-    // 3. Encode the list of maps into a single JSON string.
-    String todosAsString = jsonEncode(todosAsJson);
-
-    // 4. Save the string to shared_preferences.
-    await prefs.setString(_todosKey, todosAsString);
-  }
-
-  // Method to load the list of ToDoItems.
+  final _client = Supabase.instance.client;
   Future<List<ToDoItem>> loadTodos() async {
-    // 1. Get the instance of SharedPreferences.
-    final prefs = await SharedPreferences.getInstance();
+    try {
+      final response = await _client
+          .from('todos')
+          .select()
+          .order('due_date', ascending: true);
 
-    // 2. Try to get the saved string. It might be null if it's the first time.
-    final String? todosAsString = prefs.getString(_todosKey);
-
-    // 3. If there's no saved data, return an empty list.
-    if (todosAsString == null) {
+      if (response.isEmpty) return [];
+      return (response as List)
+          .map((json) => ToDoItem.fromJson(json as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('Error loading todos: $e');
       return [];
     }
+  }
+  Future<void> saveTodo(ToDoItem todo) async {
+    await _client.from('todos').upsert(todo.toJson());
+  }
 
-    // 4. Decode the string back into a list of JSON maps.
-    List<dynamic> todosAsJson = jsonDecode(todosAsString);
+  Future<void> saveTodos(List<ToDoItem> todos) async {
+    if (todos.isEmpty) return;
+    
+    // Convert all todos to JSON for batch insert/update
+    final todoJsonList = todos.map((todo) => todo.toJson()).toList();
+    
+    // Use upsert to insert new todos or update existing ones
+    await _client.from('todos').upsert(todoJsonList);
+  }
 
-    // 5. Convert the list of maps back into a list of ToDoItem objects.
-    List<ToDoItem> todos =
-        todosAsJson.map((json) => ToDoItem.fromJson(json)).toList();
-
-    return todos;
+  Future<void> deleteTodo(String id) async {
+    await _client.from('todos').delete().eq('id', id);
   }
 }

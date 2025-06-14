@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/todo_item.dart';
-import '../services/storage_service.dart'; // Corrected import path
+import '../services/supabase_service.dart'; // Updated import
 import '../widgets/todo_list_item_widget.dart';
 
 class ToDoListScreen extends StatefulWidget {
@@ -15,7 +15,8 @@ class ToDoListScreen extends StatefulWidget {
 
 class _ToDoListScreenState extends State<ToDoListScreen> {
   final TextEditingController _textFieldController = TextEditingController();
-  final StorageService _storageService = StorageService();  List<ToDoItem> _todos = [];
+  final SupabaseService _supabaseService = SupabaseService();
+  List<ToDoItem> _todos = [];
   bool _isLoading = true;
   bool _showCompleted = true;
   bool _hideFutureTasks = false;
@@ -45,9 +46,8 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
     super.initState();
     _loadTodosFromStorage();
   }
-
   Future<void> _loadTodosFromStorage() async {
-    final loadedTodos = await _storageService.loadTodos();
+    final loadedTodos = await _supabaseService.loadTodos();
     setState(() {
       _todos = loadedTodos;
       _isLoading = false;
@@ -55,7 +55,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   }
 
   Future<void> _saveTodosToStorage() async {
-    await _storageService.saveTodos(_todos);
+    await _supabaseService.saveTodos(_todos);
   }
 
   // This method is no longer used, but kept for reference.
@@ -84,8 +84,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
               },
             ),
             TextButton(
-              child: const Text('DELETE'),
-              onPressed: () {
+              child: const Text('DELETE'),              onPressed: () {
                 setState(() {
                   _todos.removeWhere((item) => item.id == todo.id);
                 });
@@ -240,10 +239,11 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
               },
             ),
             TextButton(
-              child: const Text('DELETE'),
-              onPressed: () {
+              child: const Text('DELETE'),              onPressed: () {
                 setState(() {
-                  parentTodo.removeSubtask(subtask.id);
+                  if (subtask.id != null) {
+                    parentTodo.removeSubtask(subtask.id!);
+                  }
                 });
                 _saveTodosToStorage();
                 Navigator.of(context).pop();
