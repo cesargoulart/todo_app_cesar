@@ -28,13 +28,16 @@ class SupabaseService {
       print('Error loading todos: $e');
       return [];
     }
-  }
-  // Save a single todo to Supabase
+  }  // Save a single todo to Supabase
   Future<ToDoItem> saveTodo(ToDoItem todo) async {
     try {
       final todoJson = todo.toJson();
       
-      // For new todos, let Supabase generate the ID
+      // Remove null ID to let Supabase generate it
+      if (todoJson['id'] == null) {
+        todoJson.remove('id');
+      }
+      
       final response = await _client
           .from(_tableName)
           .upsert(todoJson)
@@ -47,14 +50,20 @@ class SupabaseService {
       print('Error saving todo: $e');
       rethrow;
     }
-  }
-  // Save multiple todos to Supabase
+  }  // Save multiple todos to Supabase
   Future<List<ToDoItem>> saveTodos(List<ToDoItem> todos) async {
     if (todos.isEmpty) return [];
     
     try {
       // Convert all todos to JSON for batch insert/update
-      final todoJsonList = todos.map((todo) => todo.toJson()).toList();
+      final todoJsonList = todos.map((todo) {
+        final todoJson = todo.toJson();
+        // Remove null ID to let Supabase generate it
+        if (todoJson['id'] == null) {
+          todoJson.remove('id');
+        }
+        return todoJson;
+      }).toList();
       
       // Use upsert to insert new todos or update existing ones
       final response = await _client

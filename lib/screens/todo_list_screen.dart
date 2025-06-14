@@ -62,12 +62,19 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   // The logic is now inside the dialog's save button.
   // void _addToDoItem(String title, {DateTime? dueDate}) { ... }
   // void _editToDoItem(ToDoItem todo, String newTitle, {DateTime? dueDate}) { ... }
-
-  void _toggleToDoStatus(ToDoItem todo) {
-    setState(() {
-      todo.isDone = !todo.isDone;
-    });
-    _saveTodosToStorage();
+  void _toggleToDoStatus(ToDoItem todo) async {
+    try {
+      setState(() {
+        todo.isDone = !todo.isDone;
+      });
+      await _supabaseService.saveTodo(todo);
+    } catch (e) {
+      // Revert the change if save fails
+      setState(() {
+        todo.isDone = !todo.isDone;
+      });
+      print('Error updating todo status: $e');
+    }
   }
   void _deleteToDoItem(ToDoItem todo) {
     showDialog(
@@ -82,22 +89,31 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
               onPressed: () {
                 Navigator.of(context).pop();
               },
-            ),
-            TextButton(
-              child: const Text('DELETE'),              onPressed: () {
-                setState(() {
-                  _todos.removeWhere((item) => item.id == todo.id);
-                });
-                _saveTodosToStorage();
-                Navigator.of(context).pop();
-                
-                // Show a snackbar confirmation
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Task "${todo.title}" deleted'),
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
+            ),            TextButton(
+              child: const Text('DELETE'),              onPressed: () async {
+                try {
+                  if (todo.id != null) {
+                    await _supabaseService.deleteTodo(todo.id!);
+                  }
+                  setState(() {
+                    _todos.removeWhere((item) => item.id == todo.id);
+                  });
+                  Navigator.of(context).pop();
+                  
+                  // Show a snackbar confirmation
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Task "${todo.title}" deleted'),
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                } catch (e) {
+                  Navigator.of(context).pop();
+                  print('Error deleting todo: $e');
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error deleting task: $e')),
+                  );
+                }
               },
             ),
           ],
@@ -179,26 +195,49 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                   },
                 ),
                 TextButton(
-                  child: Text(saveButtonText),
-                  onPressed: () {
+                  child: Text(saveButtonText),                  onPressed: () async {
                     final newTitle = _textFieldController.text;
-                    if (newTitle.isNotEmpty) {                      setState(() { // Use a single setState call
+                    if (newTitle.isNotEmpty) {
+                      try {
                         if (isEditing) {
+                          // Update existing todo
                           existingTodo.title = newTitle;
                           existingTodo.dueDate = selectedDueDate;
+                          final updatedTodo = await _supabaseService.saveTodo(existingTodo);
+                          setState(() {
+                            // Update the todo in the list with the updated data
+                            final index = _todos.indexWhere((t) => t.id == updatedTodo.id);
+                            if (index != -1) {
+                              _todos[index] = updatedTodo;
+                            }
+                          });
                         } else {
+                          // Create new todo
                           final newTodo = ToDoItem(
                             title: newTitle,
                             dueDate: selectedDueDate,
                           );
+                          
                           if (isSubtask && parentTodo != null) {
-                            parentTodo.addSubtask(newTodo);
+                            newTodo.parentId = parentTodo.id;
+                            final savedSubtask = await _supabaseService.saveTodo(newTodo);
+                            setState(() {
+                              parentTodo.addSubtask(savedSubtask);
+                            });
                           } else {
-                            _todos.add(newTodo);
+                            final savedTodo = await _supabaseService.saveTodo(newTodo);
+                            setState(() {
+                              _todos.add(savedTodo);
+                            });
                           }
                         }
-                      });
-                      _saveTodosToStorage();
+                      } catch (e) {
+                        print('Error saving todo: $e');
+                        // Show error message to user
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error saving task: $e')),
+                        );
+                      }
                     }
                     _textFieldController.clear();
                     Navigator.of(context).pop();
