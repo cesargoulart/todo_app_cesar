@@ -75,53 +75,123 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
       });
       print('Error updating todo status: $e');
     }
-  }
-  void _deleteToDoItem(ToDoItem todo) {
+  }  void _deleteToDoItem(ToDoItem todo) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Delete Task'),
-          content: Text('Are you sure you want to delete "${todo.title}"?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Are you sure you want to delete "${todo.title}"?'),
+              if (todo.isRecurring) ...[
+                const SizedBox(height: 10),
+                const Text(
+                  'This is a recurring task. What would you like to do?',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ],
+          ),
           actions: [
             TextButton(
               child: const Text('CANCEL'),
               onPressed: () {
                 Navigator.of(context).pop();
               },
-            ),            TextButton(
-              child: const Text('DELETE'),              onPressed: () async {
-                try {
-                  if (todo.id != null) {
-                    await _supabaseService.deleteTodo(todo.id!);
-                  }
-                  setState(() {
-                    _todos.removeWhere((item) => item.id == todo.id);
-                  });
-                  Navigator.of(context).pop();
-                  
-                  // Show a snackbar confirmation
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Task "${todo.title}" deleted'),
-                      duration: const Duration(seconds: 2),
-                    ),
-                  );
-                } catch (e) {
-                  Navigator.of(context).pop();
-                  print('Error deleting todo: $e');
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error deleting task: $e')),
-                  );
-                }
-              },
             ),
+            if (todo.isRecurring) ...[
+              TextButton(
+                child: const Text('DELETE ONLY THIS'),
+                onPressed: () async {
+                  try {
+                    if (todo.id != null) {
+                      await _supabaseService.deleteTodo(todo.id!);
+                    }
+                    setState(() {
+                      _todos.removeWhere((item) => item.id == todo.id);
+                    });
+                    Navigator.of(context).pop();
+                    
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Task "${todo.title}" deleted'),
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  } catch (e) {
+                    Navigator.of(context).pop();
+                    print('Error deleting todo: $e');
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error deleting task: $e')),
+                    );
+                  }
+                },
+              ),
+              TextButton(
+                child: const Text('DELETE ALL INSTANCES'),
+                onPressed: () async {
+                  try {
+                    if (todo.id != null) {
+                      await _supabaseService.deleteRecurringTask(todo.id!, deleteInstances: true);
+                    }
+                    setState(() {
+                      // Remove the original task and all its instances
+                      _todos.removeWhere((item) => 
+                        item.id == todo.id || item.originalRecurringTaskId == todo.id);
+                    });
+                    Navigator.of(context).pop();
+                    
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Recurring task "${todo.title}" and all instances deleted'),
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  } catch (e) {
+                    Navigator.of(context).pop();
+                    print('Error deleting recurring task: $e');
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error deleting recurring task: $e')),
+                    );
+                  }
+                },
+              ),
+            ] else
+              TextButton(
+                child: const Text('DELETE'),
+                onPressed: () async {
+                  try {
+                    if (todo.id != null) {
+                      await _supabaseService.deleteTodo(todo.id!);
+                    }
+                    setState(() {
+                      _todos.removeWhere((item) => item.id == todo.id);
+                    });
+                    Navigator.of(context).pop();
+                    
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Task "${todo.title}" deleted'),
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  } catch (e) {
+                    Navigator.of(context).pop();
+                    print('Error deleting todo: $e');
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error deleting task: $e')),
+                    );
+                  }
+                },
+              ),
           ],
         );
       },
     );
   }
-
   void _showAddOrEditToDoDialog({ToDoItem? existingTodo, bool isSubtask = false, ToDoItem? parentTodo}) {
     final bool isEditing = existingTodo != null;
     final String dialogTitle = isEditing ? 'Edit To-Do' : 'Add a new To-Do';
@@ -129,6 +199,9 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
 
     _textFieldController.text = existingTodo?.title ?? '';
     DateTime? selectedDueDate = existingTodo?.dueDate;
+    bool isRecurring = existingTodo?.isRecurring ?? false;
+    RecurrenceInterval recurrenceInterval = existingTodo?.recurrenceInterval ?? RecurrenceInterval.none;
+    DateTime? recurrenceEndDate = existingTodo?.recurrenceEndDate;
 
     showDialog(
       context: context,
@@ -137,54 +210,153 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
           builder: (context, setDialogState) {
             return AlertDialog(
               title: Text(dialogTitle),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: _textFieldController,
-                    decoration: const InputDecoration(hintText: "Enter task here"),
-                    autofocus: true,
-                  ),
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Flexible( // Added Flexible to prevent overflow
-                        child: Text(
-                          selectedDueDate == null
-                              ? 'No due date'
-                              : DateFormat('MMM d, hh:mm a').format(selectedDueDate!),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: _textFieldController,
+                      decoration: const InputDecoration(hintText: "Enter task here"),
+                      autofocus: true,
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            selectedDueDate == null
+                                ? 'No due date'
+                                : DateFormat('MMM d, hh:mm a').format(selectedDueDate!),
+                          ),
                         ),
-                      ),
-                      TextButton(
-                        child: const Text('SET DATE'),
-                        onPressed: () async {
-                          final DateTime? pickedDate = await showDatePicker(
-                            context: context,
-                            initialDate: selectedDueDate ?? DateTime.now(),
-                            firstDate: DateTime.now().subtract(const Duration(days: 365)), // Allow past dates
-                            lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
-                          );
-                          if (pickedDate == null) return;
-                          final TimeOfDay? pickedTime = await showTimePicker(
-                            context: context,
-                            initialTime: TimeOfDay.fromDateTime(selectedDueDate ?? DateTime.now()),
-                          );
-                          if (pickedTime == null) return;
-                          setDialogState(() {
-                            selectedDueDate = DateTime(
-                              pickedDate.year,
-                              pickedDate.month,
-                              pickedDate.day,
-                              pickedTime.hour,
-                              pickedTime.minute,
+                        TextButton(
+                          child: const Text('SET DATE'),
+                          onPressed: () async {
+                            final DateTime? pickedDate = await showDatePicker(
+                              context: context,
+                              initialDate: selectedDueDate ?? DateTime.now(),
+                              firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                              lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
                             );
-                          });
-                        },
-                      )
+                            if (pickedDate == null) return;
+                            final TimeOfDay? pickedTime = await showTimePicker(
+                              context: context,
+                              initialTime: TimeOfDay.fromDateTime(selectedDueDate ?? DateTime.now()),
+                            );
+                            if (pickedTime == null) return;
+                            setDialogState(() {
+                              selectedDueDate = DateTime(
+                                pickedDate.year,
+                                pickedDate.month,
+                                pickedDate.day,
+                                pickedTime.hour,
+                                pickedTime.minute,
+                              );
+                            });
+                          },
+                        )
+                      ],
+                    ),
+                    
+                    // Recurring task options (only for main tasks, not subtasks)
+                    if (!isSubtask) ...[
+                      const SizedBox(height: 20),
+                      const Divider(),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: isRecurring,                            onChanged: (value) {
+                              setDialogState(() {
+                                isRecurring = value ?? false;
+                                if (!isRecurring) {
+                                  recurrenceInterval = RecurrenceInterval.none;
+                                  recurrenceEndDate = null;
+                                } else {
+                                  // Set default interval when enabling recurring
+                                  if (recurrenceInterval == RecurrenceInterval.none) {
+                                    recurrenceInterval = RecurrenceInterval.weekly;
+                                  }
+                                }
+                              });
+                            },
+                          ),
+                          const Text('Make this a recurring task'),
+                        ],
+                      ),
+                      
+                      if (isRecurring) ...[
+                        const SizedBox(height: 10),
+                        DropdownButtonFormField<RecurrenceInterval>(
+                          value: recurrenceInterval == RecurrenceInterval.none ? RecurrenceInterval.weekly : recurrenceInterval,
+                          decoration: const InputDecoration(
+                            labelText: 'Repeat every',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: [
+                            RecurrenceInterval.daily,
+                            RecurrenceInterval.weekly,
+                            RecurrenceInterval.monthly,
+                            RecurrenceInterval.yearly,
+                          ].map((interval) {
+                            return DropdownMenuItem(
+                              value: interval,
+                              child: Text(interval.displayName),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            setDialogState(() {
+                              recurrenceInterval = value ?? RecurrenceInterval.weekly;
+                            });
+                          },
+                        ),
+                        
+                        const SizedBox(height: 10),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                recurrenceEndDate == null
+                                    ? 'No end date (repeats forever)'
+                                    : 'Ends: ${DateFormat('MMM d, yyyy').format(recurrenceEndDate!)}',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ),
+                            TextButton(
+                              child: const Text('SET END DATE'),
+                              onPressed: () async {
+                                final DateTime? pickedDate = await showDatePicker(
+                                  context: context,
+                                  initialDate: recurrenceEndDate ?? DateTime.now().add(const Duration(days: 365)),
+                                  firstDate: selectedDueDate ?? DateTime.now(),
+                                  lastDate: DateTime.now().add(const Duration(days: 365 * 10)),
+                                );
+                                if (pickedDate != null) {
+                                  setDialogState(() {
+                                    recurrenceEndDate = pickedDate;
+                                  });
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                        
+                        if (recurrenceEndDate != null)
+                          TextButton(
+                            child: const Text('REMOVE END DATE'),
+                            onPressed: () {
+                              setDialogState(() {
+                                recurrenceEndDate = null;
+                              });
+                            },
+                          ),
+                      ],
                     ],
-                  ),
-                ],
+                  ],
+                ),
               ),
               actions: <Widget>[
                 TextButton(
@@ -198,26 +370,64 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                   child: Text(saveButtonText),                  onPressed: () async {
                     final newTitle = _textFieldController.text;
                     if (newTitle.isNotEmpty) {
+                      // Validate recurring tasks require a due date
+                      if (isRecurring && selectedDueDate == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Recurring tasks must have a due date. Please set a date first.'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                        return;
+                      }
+                      
                       try {
                         if (isEditing) {
                           // Update existing todo
                           existingTodo.title = newTitle;
                           existingTodo.dueDate = selectedDueDate;
+                          existingTodo.isRecurring = isRecurring;
+                          existingTodo.recurrenceInterval = isRecurring ? recurrenceInterval : RecurrenceInterval.none;
+                          existingTodo.recurrenceEndDate = recurrenceEndDate;
+                          // Set next_occurrence_date if recurring
+                          if (isRecurring && existingTodo.dueDate != null) {
+                            existingTodo.nextOccurrenceDate = existingTodo.calculateNextOccurrence();
+                          } else {
+                            existingTodo.nextOccurrenceDate = null;
+                          }
                           final updatedTodo = await _supabaseService.saveTodo(existingTodo);
                           setState(() {
-                            // Update the todo in the list with the updated data
                             final index = _todos.indexWhere((t) => t.id == updatedTodo.id);
                             if (index != -1) {
                               _todos[index] = updatedTodo;
                             }
                           });
-                        } else {
-                          // Create new todo
+                        } else {                          // Create new todo
                           final newTodo = ToDoItem(
                             title: newTitle,
                             dueDate: selectedDueDate,
+                            isRecurring: isRecurring,
+                            recurrenceInterval: isRecurring ? recurrenceInterval : RecurrenceInterval.none,
+                            recurrenceEndDate: recurrenceEndDate,
                           );
                           
+                          // Debug: Always print the task creation details
+                          print('UI: Creating new task:');
+                          print('  title: $newTitle');
+                          print('  isRecurring: $isRecurring');
+                          print('  recurrenceInterval: ${isRecurring ? recurrenceInterval.value : 'none'}');
+                          print('  selectedDueDate: $selectedDueDate');
+                          print('  newTodo.dueDate: ${newTodo.dueDate}');
+                          
+                          // Set next_occurrence_date if recurring
+                          if (isRecurring) {
+                            if (newTodo.dueDate != null) {
+                              newTodo.nextOccurrenceDate = newTodo.calculateNextOccurrence();
+                              print('  calculated nextOccurrenceDate: ${newTodo.nextOccurrenceDate}');
+                            } else {
+                              print('  WARNING: Cannot calculate next occurrence - no due date set!');
+                            }
+                          }
                           if (isSubtask && parentTodo != null) {
                             newTodo.parentId = parentTodo.id;
                             final savedSubtask = await _supabaseService.saveTodo(newTodo);
@@ -233,7 +443,6 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                         }
                       } catch (e) {
                         print('Error saving todo: $e');
-                        // Show error message to user
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(content: Text('Error saving task: $e')),
                         );

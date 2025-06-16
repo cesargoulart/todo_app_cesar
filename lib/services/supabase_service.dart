@@ -10,10 +10,12 @@ class SupabaseService {
   // IMPORTANT: This is where you define your table name.
   // This must match the table name in your Supabase dashboard.
   final String _tableName = 'todo_cesar';
-
-  // Load all todos from Supabase
+  // Load all todos from Supabase (including recurring task instances)
   Future<List<ToDoItem>> loadTodos() async {
     try {
+      // First generate any pending recurring task instances
+      await generateRecurringTaskInstances();
+      
       final response = await _client
           .from(_tableName)
           .select()
@@ -26,7 +28,16 @@ class SupabaseService {
           .toList();
     } catch (e) {
       print('Error loading todos: $e');
-      return [];
+      return [];    }
+  }
+
+  // Generate recurring task instances by calling the database function
+  Future<void> generateRecurringTaskInstances() async {
+    try {
+      await _client.rpc('generate_recurring_task_instances');
+    } catch (e) {
+      print('Error generating recurring task instances: $e');
+      // Don't rethrow - this shouldn't break the app if it fails
     }
   }  // Save a single todo to Supabase
   Future<ToDoItem> saveTodo(ToDoItem todo) async {
@@ -36,6 +47,22 @@ class SupabaseService {
       // Remove null ID to let Supabase generate it
       if (todoJson['id'] == null) {
         todoJson.remove('id');
+      }
+      
+      // If this is a recurring task, ensure next occurrence is calculated
+      if (todo.isRecurring && todo.dueDate != null && todo.recurrenceInterval != RecurrenceInterval.none) {
+        if (todo.nextOccurrenceDate == null) {
+          todo.nextOccurrenceDate = todo.calculateNextOccurrence();
+        }
+        todoJson['next_occurrence_date'] = todo.nextOccurrenceDate?.toIso8601String();
+        
+        // Debug logging
+        print('Saving recurring task:');
+        print('  isRecurring: ${todo.isRecurring}');
+        print('  recurrenceInterval: ${todo.recurrenceInterval.value}');
+        print('  dueDate: ${todo.dueDate}');
+        print('  nextOccurrenceDate: ${todo.nextOccurrenceDate}');
+        print('  todoJson next_occurrence_date: ${todoJson['next_occurrence_date']}');
       }
       
       final response = await _client
@@ -50,7 +77,7 @@ class SupabaseService {
       print('Error saving todo: $e');
       rethrow;
     }
-  }  // Save multiple todos to Supabase
+  }// Save multiple todos to Supabase
   Future<List<ToDoItem>> saveTodos(List<ToDoItem> todos) async {
     if (todos.isEmpty) return [];
     
@@ -137,7 +164,70 @@ class SupabaseService {
       // Update the parent in the database
       await saveTodo(parentTodo);
     } catch (e) {
-      print('Error removing subtask: $e');
+      print('Error removing subtask: $e');      rethrow;
+    }
+  }
+
+  // Get all recurring task instances for a specific original task
+  Future<List<ToDoItem>> getRecurringTaskInstances(String originalTaskId) async {
+    try {
+      final response = await _client
+          .from(_tableName)
+          .select()
+          .eq('original_recurring_task_id', originalTaskId)
+          .order('due_date', ascending: true);
+
+      if (response.isEmpty) return [];
+      
+      return (response as List)
+          .map((json) => ToDoItem.fromJson(json as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('Error getting recurring task instances: $e');
+      return [];
+    }
+  }
+
+  // Delete a recurring task and optionally its instances
+  Future<void> deleteRecurringTask(String id, {bool deleteInstances = false}) async {
+    try {
+      if (deleteInstances) {
+        // Delete all instances first
+        await _client
+            .from(_tableName)
+            .delete()
+            .eq('original_recurring_task_id', id);
+      }
+      
+      // Delete the original recurring task
+      await _client.from(_tableName).delete().eq('id', id);
+    } catch (e) {
+      print('Error deleting recurring task: $e');
+      rethrow;
+    }
+  }
+
+  // Update recurring task settings
+  Future<ToDoItem> updateRecurringTask(ToDoItem todo) async {
+    try {
+      final todoJson = todo.toJson();
+      
+      // Recalculate next occurrence if settings changed
+      if (todo.isRecurring && todo.dueDate != null) {
+        todo.nextOccurrenceDate = todo.calculateNextOccurrence();
+        todoJson['next_occurrence_date'] = todo.nextOccurrenceDate?.toIso8601String();
+      }
+      
+      final response = await _client
+          .from(_tableName)
+          .update(todoJson)
+          .eq('id', todo.id!)
+          .select()
+          .single();
+      
+      return ToDoItem.fromJson(response);
+    } catch (e) {
+      print('Error updating recurring task: $e');
       rethrow;
     }
   }

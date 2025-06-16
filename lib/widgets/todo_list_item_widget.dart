@@ -87,8 +87,7 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> {
                         onChanged: (bool? value) => widget.onStatusChanged(),
                       ),
                     ],
-                  ),
-                  title: Row(
+                  ),                  title: Row(
                     children: [
                       Expanded(
                         child: Text(
@@ -103,6 +102,26 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> {
                           ),
                         ),
                       ),
+                      // Recurring task indicator
+                      if (todo.isRecurring)
+                        Container(
+                          margin: const EdgeInsets.only(right: 8),
+                          child: Icon(
+                            Icons.repeat,
+                            size: 16,
+                            color: Theme.of(context).primaryColor,
+                          ),
+                        ),
+                      // Recurring instance indicator
+                      if (todo.isRecurringInstance)
+                        Container(
+                          margin: const EdgeInsets.only(right: 8),
+                          child: Icon(
+                            Icons.schedule,
+                            size: 16,
+                            color: Colors.orange,
+                          ),
+                        ),
                       if (todo.subtasks.isNotEmpty)
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -121,8 +140,7 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> {
                           ),
                         ),
                     ],
-                  ),
-                  subtitle: Column(
+                  ),                  subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       if (todo.dueDate != null)
@@ -132,6 +150,25 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> {
                             fontSize: 12,
                             color: isOverdue ? Colors.red : Colors.grey[600],
                             fontWeight: isOverdue ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                      // Show recurring information
+                      if (todo.isRecurring)
+                        Text(
+                          'Repeats ${todo.recurrenceInterval.displayName.toLowerCase()}${todo.recurrenceEndDate != null ? ' until ${DateFormat('MMM d, yyyy').format(todo.recurrenceEndDate!)}' : ''}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context).primaryColor,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      if (todo.isRecurringInstance)
+                        Text(
+                          'Part of recurring task',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.orange,
+                            fontStyle: FontStyle.italic,
                           ),
                         ),
                       if (todo.subtasks.isNotEmpty)
