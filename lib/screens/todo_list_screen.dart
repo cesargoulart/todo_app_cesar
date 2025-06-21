@@ -279,6 +279,10 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                                   if (recurrenceInterval == RecurrenceInterval.none) {
                                     recurrenceInterval = RecurrenceInterval.weekly;
                                   }
+                                  // Auto-set due date to now if not already set
+                                  if (selectedDueDate == null) {
+                                    selectedDueDate = DateTime.now();
+                                  }
                                 }
                               });
                             },
@@ -370,17 +374,6 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                   child: Text(saveButtonText),                  onPressed: () async {
                     final newTitle = _textFieldController.text;
                     if (newTitle.isNotEmpty) {
-                      // Validate recurring tasks require a due date
-                      if (isRecurring && selectedDueDate == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Recurring tasks must have a due date. Please set a date first.'),
-                            backgroundColor: Colors.orange,
-                          ),
-                        );
-                        return;
-                      }
-                      
                       try {
                         if (isEditing) {
                           // Update existing todo
