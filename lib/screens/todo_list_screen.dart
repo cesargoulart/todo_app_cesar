@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/todo_item.dart';
+import '../models/label.dart';
 import '../services/supabase_service.dart'; // Updated import
+import '../services/label_service.dart';
 import '../widgets/todo_list_item_widget.dart';
+import '../widgets/label_picker_widget.dart';
 
 class ToDoListScreen extends StatefulWidget {
   final Function(ThemeMode) onThemeModeChanged;
@@ -13,14 +16,13 @@ class ToDoListScreen extends StatefulWidget {
   State<ToDoListScreen> createState() => _ToDoListScreenState();
 }
 
-class _ToDoListScreenState extends State<ToDoListScreen> {
-  final TextEditingController _textFieldController = TextEditingController();
+class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingController _textFieldController = TextEditingController();
   final SupabaseService _supabaseService = SupabaseService();
-  List<ToDoItem> _todos = [];
-  bool _isLoading = true;
+  final LabelService _labelService = LabelService();
+  List<ToDoItem> _todos = [];  bool _isLoading = true;
   bool _showCompleted = true;
   bool _hideFutureTasks = false;
-
+  Label? _filterByLabel;
   List<ToDoItem> get _filteredTodos {
     List<ToDoItem> filtered = _todos;
     
@@ -36,6 +38,12 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
         // Keep tasks without due dates or tasks due within 3 days
         return todo.dueDate == null || todo.dueDate!.isBefore(threeDaysFromNow);
       }).toList();
+    }
+    
+    // Filter by label
+    if (_filterByLabel != null) {
+      filtered = filtered.where((todo) => 
+        todo.labels.any((label) => label.id == _filterByLabel!.id)).toList();
     }
     
     return filtered;
@@ -198,10 +206,10 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
     final String saveButtonText = isEditing ? 'SAVE' : 'ADD';
 
     _textFieldController.text = existingTodo?.title ?? '';
-    DateTime? selectedDueDate = existingTodo?.dueDate;
-    bool isRecurring = existingTodo?.isRecurring ?? false;
+    DateTime? selectedDueDate = existingTodo?.dueDate;    bool isRecurring = existingTodo?.isRecurring ?? false;
     RecurrenceInterval recurrenceInterval = existingTodo?.recurrenceInterval ?? RecurrenceInterval.none;
     DateTime? recurrenceEndDate = existingTodo?.recurrenceEndDate;
+    List<Label> selectedLabels = List.from(existingTodo?.labels ?? []);
 
     showDialog(
       context: context,
@@ -355,10 +363,22 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                               setDialogState(() {
                                 recurrenceEndDate = null;
                               });
-                            },
-                          ),
+                            },                          ),
                       ],
                     ],
+                    
+                    // Label picker (for all tasks)
+                    const SizedBox(height: 20),
+                    const Divider(),
+                    const SizedBox(height: 10),
+                    LabelPickerWidget(
+                      selectedLabels: selectedLabels,
+                      onLabelsChanged: (labels) {
+                        setDialogState(() {
+                          selectedLabels = labels;
+                        });
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -378,21 +398,27 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                         if (isEditing) {
                           // Update existing todo
                           existingTodo.title = newTitle;
-                          existingTodo.dueDate = selectedDueDate;
-                          existingTodo.isRecurring = isRecurring;
+                          existingTodo.dueDate = selectedDueDate;                          existingTodo.isRecurring = isRecurring;
                           existingTodo.recurrenceInterval = isRecurring ? recurrenceInterval : RecurrenceInterval.none;
                           existingTodo.recurrenceEndDate = recurrenceEndDate;
+                          existingTodo.labels = selectedLabels;
                           // Set next_occurrence_date if recurring
                           if (isRecurring && existingTodo.dueDate != null) {
                             existingTodo.nextOccurrenceDate = existingTodo.calculateNextOccurrence();
                           } else {
                             existingTodo.nextOccurrenceDate = null;
                           }
+                          
                           final updatedTodo = await _supabaseService.saveTodo(existingTodo);
+                          
+                          // Update task labels in database
+                          await _updateTaskLabels(updatedTodo.id!, selectedLabels);
+                          
                           setState(() {
                             final index = _todos.indexWhere((t) => t.id == updatedTodo.id);
                             if (index != -1) {
                               _todos[index] = updatedTodo;
+                              _todos[index].labels = selectedLabels;
                             }
                           });
                         } else {                          // Create new todo
@@ -502,9 +528,32 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
       },
     );
   }
-
   void _editSubtask(ToDoItem parentTodo, ToDoItem subtask) {
     _showAddOrEditToDoDialog(existingTodo: subtask, isSubtask: true, parentTodo: parentTodo);
+  }
+
+  // Update task labels in database
+  Future<void> _updateTaskLabels(String taskId, List<Label> labels) async {
+    try {
+      // Get current labels for the task
+      final currentLabels = await _labelService.getLabelsForTask(taskId);
+      
+      // Remove labels that are no longer selected
+      for (Label currentLabel in currentLabels) {
+        if (!labels.any((l) => l.id == currentLabel.id)) {
+          await _labelService.removeLabelFromTask(taskId, currentLabel.id!);
+        }
+      }
+      
+      // Add new labels
+      for (Label label in labels) {
+        if (!currentLabels.any((l) => l.id == label.id)) {
+          await _labelService.addLabelToTask(taskId, label.id!);
+        }
+      }
+    } catch (e) {
+      print('Error updating task labels: $e');
+    }
   }
 
   @override

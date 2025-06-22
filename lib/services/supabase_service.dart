@@ -2,15 +2,15 @@
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/todo_item.dart';
+import 'label_service.dart';
 
-class SupabaseService {
-  // Get a reference to the Supabase client
+class SupabaseService {  // Get a reference to the Supabase client
   final SupabaseClient _client = Supabase.instance.client;
+  final LabelService _labelService = LabelService();
 
   // IMPORTANT: This is where you define your table name.
   // This must match the table name in your Supabase dashboard.
-  final String _tableName = 'todo_cesar';
-  // Load all todos from Supabase (including recurring task instances)
+  final String _tableName = 'todo_cesar';  // Load all todos from Supabase (including recurring task instances and labels)
   Future<List<ToDoItem>> loadTodos() async {
     try {
       // First generate any pending recurring task instances
@@ -23,9 +23,18 @@ class SupabaseService {
 
       if (response.isEmpty) return [];
       
-      return (response as List)
+      List<ToDoItem> todos = (response as List)
           .map((json) => ToDoItem.fromJson(json as Map<String, dynamic>))
           .toList();
+
+      // Load labels for each todo
+      for (ToDoItem todo in todos) {
+        if (todo.id != null) {
+          todo.labels = await _labelService.getLabelsForTask(todo.id!);
+        }
+      }
+      
+      return todos;
     } catch (e) {
       print('Error loading todos: $e');
       return [];    }

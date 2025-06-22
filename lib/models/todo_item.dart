@@ -1,5 +1,7 @@
 // lib/models/todo_item.dart
 
+import 'label.dart';
+
 enum RecurrenceInterval {
   none('none'),
   daily('daily'),
@@ -54,10 +56,9 @@ class ToDoItem {
   // Recurring task properties
   bool isRecurring;
   RecurrenceInterval recurrenceInterval;
-  DateTime? recurrenceEndDate;
-  String? originalRecurringTaskId; // For instances generated from recurring tasks
+  DateTime? recurrenceEndDate;  String? originalRecurringTaskId; // For instances generated from recurring tasks
   DateTime? nextOccurrenceDate;
-
+  List<Label> labels = []; // Labels assigned to this task
   ToDoItem({
     this.id, // Allow ID to be passed in
     required this.title,
@@ -69,7 +70,10 @@ class ToDoItem {
     this.recurrenceEndDate,
     this.originalRecurringTaskId,
     this.nextOccurrenceDate,
-  });
+    List<Label>? labels,
+  }) {
+    this.labels = labels ?? [];
+  }
   // Method to convert a ToDoItem instance to a JSON map.
   Map<String, dynamic> toJson() {
     final Map<String, dynamic> data = {
@@ -89,9 +93,17 @@ class ToDoItem {
       data['id'] = id;
     }
     return data;
-  }
-  // Factory constructor to create a ToDoItem from a JSON map.
+  }  // Factory constructor to create a ToDoItem from a JSON map.
   factory ToDoItem.fromJson(Map<String, dynamic> json) {
+    List<Label> parsedLabels = [];
+    if (json['labels'] != null) {
+      if (json['labels'] is List) {
+        parsedLabels = (json['labels'] as List)
+            .map((labelJson) => Label.fromJson(labelJson as Map<String, dynamic>))
+            .toList();
+      }
+    }
+    
     final item = ToDoItem(
       id: json['id'],
       title: json['title'],
@@ -103,6 +115,7 @@ class ToDoItem {
       recurrenceEndDate: json['recurrence_end_date'] != null ? DateTime.parse(json['recurrence_end_date']) : null,
       originalRecurringTaskId: json['original_recurring_task_id'],
       nextOccurrenceDate: json['next_occurrence_date'] != null ? DateTime.parse(json['next_occurrence_date']) : null,
+      labels: parsedLabels,
     );
     // Note: Subtasks would need to be loaded separately if stored in a related table.
     // This model assumes they are handled in-memory or via a separate query.
@@ -162,8 +175,26 @@ class ToDoItem {
     
     // Generate if next occurrence is due and hasn't exceeded end date
     final isDue = nextOccurrenceDate!.isBefore(now) || nextOccurrenceDate!.isAtSameMomentAs(now);
-    final withinEndDate = recurrenceEndDate == null || nextOccurrenceDate!.isBefore(recurrenceEndDate!);
-    
+    final withinEndDate = recurrenceEndDate == null || nextOccurrenceDate!.isBefore(recurrenceEndDate!);    
     return isDue && withinEndDate;
+  }
+
+  // Label management methods
+  void addLabel(Label label) {
+    if (!labels.any((l) => l.id == label.id)) {
+      labels.add(label);
+    }
+  }
+
+  void removeLabel(String labelId) {
+    labels.removeWhere((label) => label.id == labelId);
+  }
+
+  bool hasLabel(String labelId) {
+    return labels.any((label) => label.id == labelId);
+  }
+
+  List<String> get labelNames {
+    return labels.map((label) => label.name).toList();
   }
 }

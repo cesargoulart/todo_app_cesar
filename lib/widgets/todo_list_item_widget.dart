@@ -33,6 +33,14 @@ class ToDoListItemWidget extends StatefulWidget {
 class _ToDoListItemWidgetState extends State<ToDoListItemWidget> {
   bool _isExpanded = false;
 
+  Color _parseColor(String colorString) {
+    try {
+      return Color(int.parse(colorString.replaceFirst('#', '0xFF')));
+    } catch (e) {
+      return Colors.blue;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final todo = widget.todo;
@@ -161,14 +169,39 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> {
                             color: Theme.of(context).primaryColor,
                             fontStyle: FontStyle.italic,
                           ),
-                        ),
-                      if (todo.isRecurringInstance)
+                        ),                      if (todo.isRecurringInstance)
                         Text(
                           'Part of recurring task',
                           style: TextStyle(
                             fontSize: 11,
                             color: Colors.orange,
                             fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      // Show labels
+                      if (todo.labels.isNotEmpty)
+                        Container(
+                          margin: const EdgeInsets.only(top: 8),
+                          child: Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: todo.labels.map((label) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: _parseColor(label.color).withOpacity(0.8),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  label.name,
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
                           ),
                         ),
                       if (todo.subtasks.isNotEmpty)
