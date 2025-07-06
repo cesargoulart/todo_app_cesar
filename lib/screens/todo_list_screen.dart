@@ -455,6 +455,9 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
                             });
                           } else {
                             final savedTodo = await _supabaseService.saveTodo(newTodo);
+                            // Update task labels in database
+                            await _updateTaskLabels(savedTodo.id!, selectedLabels);
+                            savedTodo.labels = selectedLabels;  // Set the labels on the todo item
                             setState(() {
                               _todos.add(savedTodo);
                             });
