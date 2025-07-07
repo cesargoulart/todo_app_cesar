@@ -37,7 +37,8 @@ dependencies:
   shared_preferences: ^2.5.3
   intl: ^0.20.2
   supabase_flutter: ^2.3.4 
-  timezone: ^0.10.1
+  timezone: ^0.9.4
+  flutter_local_notifications: ^17.2.2
   
 
 dev_dependencies:

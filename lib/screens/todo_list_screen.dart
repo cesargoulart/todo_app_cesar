@@ -4,6 +4,8 @@ import '../models/todo_item.dart';
 import '../models/label.dart';
 import '../services/supabase_service.dart'; // Updated import
 import '../services/label_service.dart';
+import '../services/notification_service.dart';
+import '../services/simple_notification_test.dart';
 import '../widgets/todo_list_item_widget.dart';
 import '../widgets/label_picker_widget.dart';
 
@@ -16,10 +18,13 @@ class ToDoListScreen extends StatefulWidget {
   State<ToDoListScreen> createState() => _ToDoListScreenState();
 }
 
-class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingController _textFieldController = TextEditingController();
+class _ToDoListScreenState extends State<ToDoListScreen> {
+  final TextEditingController _textFieldController = TextEditingController();
   final SupabaseService _supabaseService = SupabaseService();
   final LabelService _labelService = LabelService();
-  List<ToDoItem> _todos = [];  bool _isLoading = true;
+  final NotificationService _notificationService = NotificationService();
+  List<ToDoItem> _todos = [];
+  bool _isLoading = true;
   bool _showCompleted = true;
   bool _hideFutureTasks = false;
   Label? _filterByLabel;
@@ -54,6 +59,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
     super.initState();
     _loadTodosFromStorage();
   }
+
   Future<void> _loadTodosFromStorage() async {
     final loadedTodos = await _supabaseService.loadTodos();
     setState(() {
@@ -66,24 +72,51 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
     await _supabaseService.saveTodos(_todos);
   }
 
-  // This method is no longer used, but kept for reference.
-  // The logic is now inside the dialog's save button.
-  // void _addToDoItem(String title, {DateTime? dueDate}) { ... }
-  // void _editToDoItem(ToDoItem todo, String newTitle, {DateTime? dueDate}) { ... }
   void _toggleToDoStatus(ToDoItem todo) async {
+    final originalStatus = todo.isDone;
+    // Optimistically update the UI
+    setState(() {
+      todo.isDone = !todo.isDone;
+    });
+
     try {
-      setState(() {
-        todo.isDone = !todo.isDone;
-      });
+      // Update notifications based on the new status
+      if (todo.isDone) {
+        // Task is now complete, cancel any pending notifications
+        if (todo.id != null) {
+          await _notificationService.cancelTaskNotifications(todo.id!);
+          print('✅ Cancelled notifications for completed task: ${todo.title}');
+        }
+      } else {
+        // Task is now incomplete, re-schedule notification if it has a future due date
+        if (todo.id != null && todo.dueDate != null && todo.dueDate!.isAfter(DateTime.now())) {
+          await _notificationService.scheduleTaskDueNotification(
+            taskId: todo.id!,
+            taskTitle: todo.title,
+            dueDate: todo.dueDate!,
+          );
+          print('🔄 Re-scheduled notification for incomplete task: ${todo.title}');
+        }
+      }
+
+      // Persist the change to the database
       await _supabaseService.saveTodo(todo);
+
     } catch (e) {
-      // Revert the change if save fails
+      // If anything fails, revert the change in the UI
       setState(() {
-        todo.isDone = !todo.isDone;
+        todo.isDone = originalStatus;
       });
-      print('Error updating todo status: $e');
+      print('Error updating todo status or notifications: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating task: $e')),
+        );
+      }
     }
-  }  void _deleteToDoItem(ToDoItem todo) {
+  }
+
+  void _deleteToDoItem(ToDoItem todo) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -116,6 +149,8 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
                 onPressed: () async {
                   try {
                     if (todo.id != null) {
+                      // First, cancel any pending notifications for this task
+                      await _notificationService.cancelTaskNotifications(todo.id!);
                       await _supabaseService.deleteTodo(todo.id!);
                     }
                     setState(() {
@@ -173,6 +208,8 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
                 onPressed: () async {
                   try {
                     if (todo.id != null) {
+                      // First, cancel any pending notifications for this task
+                      await _notificationService.cancelTaskNotifications(todo.id!);
                       await _supabaseService.deleteTodo(todo.id!);
                     }
                     setState(() {
@@ -200,13 +237,15 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
       },
     );
   }
+
   void _showAddOrEditToDoDialog({ToDoItem? existingTodo, bool isSubtask = false, ToDoItem? parentTodo}) {
     final bool isEditing = existingTodo != null;
     final String dialogTitle = isEditing ? 'Edit To-Do' : 'Add a new To-Do';
     final String saveButtonText = isEditing ? 'SAVE' : 'ADD';
 
     _textFieldController.text = existingTodo?.title ?? '';
-    DateTime? selectedDueDate = existingTodo?.dueDate;    bool isRecurring = existingTodo?.isRecurring ?? false;
+    DateTime? selectedDueDate = existingTodo?.dueDate;
+    bool isRecurring = existingTodo?.isRecurring ?? false;
     RecurrenceInterval recurrenceInterval = existingTodo?.recurrenceInterval ?? RecurrenceInterval.none;
     DateTime? recurrenceEndDate = existingTodo?.recurrenceEndDate;
     List<Label> selectedLabels = List.from(existingTodo?.labels ?? []);
@@ -276,7 +315,8 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
                       Row(
                         children: [
                           Checkbox(
-                            value: isRecurring,                            onChanged: (value) {
+                            value: isRecurring,
+                            onChanged: (value) {
                               setDialogState(() {
                                 isRecurring = value ?? false;
                                 if (!isRecurring) {
@@ -363,7 +403,8 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
                               setDialogState(() {
                                 recurrenceEndDate = null;
                               });
-                            },                          ),
+                            },
+                          ),
                       ],
                     ],
                     
@@ -391,14 +432,16 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
                   },
                 ),
                 TextButton(
-                  child: Text(saveButtonText),                  onPressed: () async {
+                  child: Text(saveButtonText),
+                  onPressed: () async {
                     final newTitle = _textFieldController.text;
                     if (newTitle.isNotEmpty) {
                       try {
                         if (isEditing) {
                           // Update existing todo
                           existingTodo.title = newTitle;
-                          existingTodo.dueDate = selectedDueDate;                          existingTodo.isRecurring = isRecurring;
+                          existingTodo.dueDate = selectedDueDate;
+                          existingTodo.isRecurring = isRecurring;
                           existingTodo.recurrenceInterval = isRecurring ? recurrenceInterval : RecurrenceInterval.none;
                           existingTodo.recurrenceEndDate = recurrenceEndDate;
                           existingTodo.labels = selectedLabels;
@@ -413,6 +456,15 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
                           
                           // Update task labels in database
                           await _updateTaskLabels(updatedTodo.id!, selectedLabels);
+
+                          // Schedule notification if due date is set
+                          if (updatedTodo.id != null && updatedTodo.dueDate != null) {
+                            await _notificationService.scheduleTaskDueNotification(
+                              taskId: updatedTodo.id!,
+                              taskTitle: updatedTodo.title,
+                              dueDate: updatedTodo.dueDate!,
+                            );
+                          }
                           
                           setState(() {
                             final index = _todos.indexWhere((t) => t.id == updatedTodo.id);
@@ -421,7 +473,8 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
                               _todos[index].labels = selectedLabels;
                             }
                           });
-                        } else {                          // Create new todo
+                        } else {
+                          // Create new todo
                           final newTodo = ToDoItem(
                             title: newTitle,
                             dueDate: selectedDueDate,
@@ -458,6 +511,16 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
                             // Update task labels in database
                             await _updateTaskLabels(savedTodo.id!, selectedLabels);
                             savedTodo.labels = selectedLabels;  // Set the labels on the todo item
+
+                            // Schedule notification if due date is set
+                            if (savedTodo.id != null && savedTodo.dueDate != null) {
+                              await _notificationService.scheduleTaskDueNotification(
+                                taskId: savedTodo.id!,
+                                taskTitle: savedTodo.title,
+                                dueDate: savedTodo.dueDate!,
+                              );
+                            }
+
                             setState(() {
                               _todos.add(savedTodo);
                             });
@@ -509,7 +572,8 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
               },
             ),
             TextButton(
-              child: const Text('DELETE'),              onPressed: () {
+              child: const Text('DELETE'),
+              onPressed: () {
                 setState(() {
                   if (subtask.id != null) {
                     parentTodo.removeSubtask(subtask.id!);
@@ -559,6 +623,97 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
     }
   }
 
+  void _showDebugDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Notification Debug Menu'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.timer_outlined),
+                title: const Text('Schedule Test (10s)'),
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _notificationService.scheduleTestNotification(secondsFromNow: 10);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Test notification scheduled for 10 seconds!')),
+                    );
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.timer_10),
+                title: const Text('Quick Test (5s)'),
+                subtitle: const Text('Fast test notification'),
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _notificationService.scheduleTestNotification(secondsFromNow: 5);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Quick test notification scheduled for 5 seconds!')),
+                    );
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.notifications_active),
+                title: const Text('Show Immediate Test'),
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _notificationService.showTestNotification();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Immediate test notification sent!')),
+                    );
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.plumbing),
+                title: const Text('Check Status'),
+                subtitle: const Text('Prints pending notifications to console'),
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _notificationService.debugNotificationStatus();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Check debug console for status')),
+                    );
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_sweep),
+                title: const Text('Cancel All Notifications'),
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _notificationService.cancelAllNotifications();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('All pending notifications cancelled')),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              child: const Text('CLOSE'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
@@ -573,7 +728,8 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
               final newThemeMode = isDarkMode ? ThemeMode.light : ThemeMode.dark;
               widget.onThemeModeChanged(newThemeMode);
             },
-          ),          IconButton(
+          ),
+          IconButton(
             icon: Icon(_showCompleted ? Icons.visibility_off : Icons.visibility),
             tooltip: _showCompleted ? 'Hide completed tasks' : 'Show completed tasks',
             onPressed: () {
@@ -591,12 +747,18 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
               });
             },
           ),
+          IconButton(
+            icon: const Icon(Icons.science_outlined),
+            tooltip: 'Debug Notifications',
+            onPressed: () => _showDebugDialog(),
+          ),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : ListView.builder(
-              itemCount: _filteredTodos.length,              itemBuilder: (context, index) {
+              itemCount: _filteredTodos.length,
+              itemBuilder: (context, index) {
                 final todo = _filteredTodos[index];
                 return ToDoListItemWidget(
                   todo: todo,
@@ -615,7 +777,6 @@ class _ToDoListScreenState extends State<ToDoListScreen> {  final TextEditingCon
         tooltip: 'Add To-Do',
         child: const Icon(Icons.add),
       ),
-      // The BottomAppBar has been removed from here.
     );
   }
 }

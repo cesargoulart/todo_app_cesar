@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import '../screens/todo_list_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'supabase_credentials.dart';
+import 'services/notification_service.dart';
+import 'services/simple_notification_test.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -12,6 +14,9 @@ void main() async {
     url: supabaseUrl,
     anonKey: supabaseAnnonKey,
   );
+  
+  // Initialize notifications
+  await NotificationService().initialize();
   
   runApp(const MyApp());
 }

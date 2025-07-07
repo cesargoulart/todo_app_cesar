@@ -3,10 +3,12 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/todo_item.dart';
 import 'label_service.dart';
+import 'notification_service.dart';
 
 class SupabaseService {  // Get a reference to the Supabase client
   final SupabaseClient _client = Supabase.instance.client;
   final LabelService _labelService = LabelService();
+  final NotificationService _notificationService = NotificationService();
 
   // IMPORTANT: This is where you define your table name.
   // This must match the table name in your Supabase dashboard.
@@ -81,7 +83,14 @@ class SupabaseService {  // Get a reference to the Supabase client
           .single();
       
       // Return the todo with the database-generated ID
-      return ToDoItem.fromJson(response);
+      ToDoItem savedTodo = ToDoItem.fromJson(response);
+      
+      // Schedule notifications for tasks with due dates
+      if (savedTodo.id != null && savedTodo.dueDate != null && !savedTodo.isDone) {
+        await _scheduleNotificationsForTask(savedTodo);
+      }
+      
+      return savedTodo;
     } catch (e) {
       print('Error saving todo: $e');
       rethrow;
@@ -120,6 +129,9 @@ class SupabaseService {  // Get a reference to the Supabase client
   // Delete a todo from Supabase
   Future<void> deleteTodo(String id) async {
     try {
+      // Cancel any scheduled notifications for this task
+      await _notificationService.cancelTaskNotifications(id);
+      
       await _client.from(_tableName).delete().eq('id', id);
     } catch (e) {
       print('Error deleting todo: $e');
@@ -134,6 +146,23 @@ class SupabaseService {  // Get a reference to the Supabase client
           .from(_tableName)
           .update({'is_done': isDone})
           .eq('id', id);
+      
+      if (isDone) {
+        // Cancel notifications when task is completed
+        await _notificationService.cancelTaskNotifications(id);
+        
+        // Show completion notification (optional)
+        final todo = await _getTaskById(id);
+        if (todo != null) {
+          await _notificationService.showTaskCompletedNotification(taskTitle: todo.title);
+        }
+      } else {
+        // Re-schedule notifications when task is marked as not done
+        final todo = await _getTaskById(id);
+        if (todo != null && todo.dueDate != null) {
+          await _scheduleNotificationsForTask(todo);
+        }
+      }
     } catch (e) {
       print('Error updating todo status: $e');
       rethrow;
@@ -238,6 +267,78 @@ class SupabaseService {  // Get a reference to the Supabase client
     } catch (e) {
       print('Error updating recurring task: $e');
       rethrow;
+    }
+  }
+
+  // Helper method to get a task by ID
+  Future<ToDoItem?> _getTaskById(String id) async {
+    try {
+      final response = await _client
+          .from(_tableName)
+          .select()
+          .eq('id', id)
+          .single();
+      
+      return ToDoItem.fromJson(response);
+    } catch (e) {
+      print('Error getting task by ID: $e');
+      return null;
+    }
+  }
+
+  // Helper method to schedule notifications for a task
+  Future<void> _scheduleNotificationsForTask(ToDoItem task) async {
+    if (task.id == null || task.dueDate == null || task.isDone) {
+      return;
+    }
+
+    try {
+      // Cancel any existing notifications for this task
+      await _notificationService.cancelTaskNotifications(task.id!);
+
+      // Schedule notification for when task is due
+      await _notificationService.scheduleTaskDueNotification(
+        taskId: task.id!,
+        taskTitle: task.title,
+        dueDate: task.dueDate!,
+      );
+
+      // Schedule reminder notification 1 hour before due date
+      await _notificationService.scheduleTaskReminderNotification(
+        taskId: task.id!,
+        taskTitle: task.title,
+        dueDate: task.dueDate!,
+        reminderBefore: const Duration(hours: 1),
+      );
+
+      // Schedule reminder notification 1 day before due date (if due date is more than 1 day away)
+      final now = DateTime.now();
+      final daysBefore = task.dueDate!.difference(now).inDays;
+      if (daysBefore > 1) {
+        await _notificationService.scheduleTaskReminderNotification(
+          taskId: task.id!,
+          taskTitle: task.title,
+          dueDate: task.dueDate!,
+          reminderBefore: const Duration(days: 1),
+        );
+      }
+    } catch (e) {
+      print('Error scheduling notifications for task: $e');
+      // Don't rethrow - notification errors shouldn't break the app
+    }
+  }
+
+  // Utility method to reschedule notifications for all existing tasks
+  Future<void> rescheduleAllNotifications() async {
+    try {
+      final todos = await loadTodos();
+      for (ToDoItem todo in todos) {
+        if (todo.id != null && todo.dueDate != null && !todo.isDone) {
+          await _scheduleNotificationsForTask(todo);
+        }
+      }
+    } catch (e) {
+      print('Error rescheduling notifications: $e');
     }
   }
 }
