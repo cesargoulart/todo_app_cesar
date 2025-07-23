@@ -6,6 +6,7 @@ import '../services/supabase_service.dart'; // Updated import
 import '../services/label_service.dart';
 import '../services/notification_service.dart';
 import '../services/simple_notification_test.dart';
+import '../services/auto_update_service.dart';
 import '../widgets/todo_list_item_widget.dart';
 import '../widgets/label_picker_widget.dart';
 
@@ -746,7 +747,15 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                 _hideFutureTasks = !_hideFutureTasks;
               });
             },
-          ),
+         ),
+         IconButton(
+           icon: const Icon(Icons.system_update),
+           tooltip: 'Check for updates',
+           onPressed: () async {
+             final autoUpdateService = AutoUpdateService();
+             await autoUpdateService.manualUpdateCheck();
+           },
+         ),
           IconButton(
             icon: const Icon(Icons.science_outlined),
             tooltip: 'Debug Notifications',
