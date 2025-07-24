@@ -28,6 +28,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   bool _isLoading = true;
   bool _showCompleted = true;
   bool _hideFutureTasks = false;
+  bool _hideCremesTasks = false; // Nova variável para esconder tasks com label 'Cremes'
   Label? _filterByLabel;
   List<ToDoItem> get _filteredTodos {
     List<ToDoItem> filtered = _todos;
@@ -44,6 +45,12 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
         // Keep tasks without due dates or tasks due within 3 days
         return todo.dueDate == null || todo.dueDate!.isBefore(threeDaysFromNow);
       }).toList();
+    }
+    
+    // Filter out tasks with 'Cremes' label
+    if (_hideCremesTasks) {
+      filtered = filtered.where((todo) => 
+        !todo.labels.any((label) => label.name.toLowerCase() == 'cremes')).toList();
     }
     
     // Filter by label
@@ -802,6 +809,15 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                 _hideFutureTasks = !_hideFutureTasks;
               });
             },
+         ),
+         IconButton(
+           icon: Icon(_hideCremesTasks ? Icons.spa : Icons.spa_outlined),
+           tooltip: _hideCremesTasks ? 'Show Cremes tasks' : 'Hide Cremes tasks',
+           onPressed: () {
+             setState(() {
+               _hideCremesTasks = !_hideCremesTasks;
+             });
+           },
          ),
          IconButton(
            icon: const Icon(Icons.system_update),
