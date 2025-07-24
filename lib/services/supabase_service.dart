@@ -5,8 +5,19 @@ import '../models/todo_item.dart';
 import 'label_service.dart';
 import 'notification_service.dart';
 
-class SupabaseService {  // Get a reference to the Supabase client
-  final SupabaseClient _client = Supabase.instance.client;
+class SupabaseService {
+  static final SupabaseService _instance = SupabaseService._internal();
+  factory SupabaseService() => _instance;
+  SupabaseService._internal();
+  
+  // Get a reference to the Supabase client with error handling
+  SupabaseClient get _client {
+    try {
+      return Supabase.instance.client;
+    } catch (e) {
+      throw Exception('Supabase client not initialized. Make sure Supabase.initialize() is called before using SupabaseService. Error: $e');
+    }
+  }
   final LabelService _labelService = LabelService();
   final NotificationService _notificationService = NotificationService();
 

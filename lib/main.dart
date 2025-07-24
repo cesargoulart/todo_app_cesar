@@ -10,16 +10,26 @@ import 'services/simple_notification_test.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  await Supabase.initialize(
-    url: supabaseUrl,
-    anonKey: supabaseAnnonKey,
-  );
-  
-  // Initialize notifications
-  await NotificationService().initialize();
+  try {
+    // Initialize Supabase first
+    await Supabase.initialize(
+      url: supabaseUrl,
+      anonKey: supabaseAnnonKey,
+    );
+    print('✅ Supabase initialized successfully');
+    
+    // Initialize notifications after Supabase
+    await NotificationService().initialize();
+    print('✅ NotificationService initialized successfully');
 
-  // Initialize auto-update service
-  await AutoUpdateService().initialize();
+    // Initialize auto-update service last
+    await AutoUpdateService().initialize();
+    print('✅ AutoUpdateService initialized successfully');
+    
+  } catch (e) {
+    print('❌ Error during initialization: $e');
+    // Continue with app startup even if some services fail
+  }
   
   runApp(const MyApp());
 }

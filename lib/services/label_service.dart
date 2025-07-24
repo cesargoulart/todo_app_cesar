@@ -4,7 +4,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/label.dart';
 
 class LabelService {
-  final SupabaseClient _client = Supabase.instance.client;
+  static final LabelService _instance = LabelService._internal();
+  factory LabelService() => _instance;
+  LabelService._internal();
+  
+  SupabaseClient get _client => Supabase.instance.client;
   final String _labelsTable = 'todo_labels';
   final String _taskLabelsTable = 'todo_task_labels';
 

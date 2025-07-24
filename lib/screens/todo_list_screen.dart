@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/todo_item.dart';
 import '../models/label.dart';
 import '../services/supabase_service.dart'; // Updated import
 import '../services/label_service.dart';
 import '../services/notification_service.dart';
-import '../services/simple_notification_test.dart';
 import '../services/auto_update_service.dart';
 import '../widgets/todo_list_item_widget.dart';
 import '../widgets/label_picker_widget.dart';
@@ -61,6 +61,17 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
     _loadTodosFromStorage();
   }
 
+  bool _isServiceReady() {
+    try {
+      // Test if Supabase client is available
+      Supabase.instance.client;
+      return true;
+    } catch (e) {
+      print('⚠️ Service not ready: $e');
+      return false;
+    }
+  }
+
   Future<void> _loadTodosFromStorage() async {
     final loadedTodos = await _supabaseService.loadTodos();
     setState(() {
@@ -74,44 +85,88 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   }
 
   void _toggleToDoStatus(ToDoItem todo) async {
+    // Check if services are ready before proceeding
+    if (!_isServiceReady()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Services are still initializing. Please wait a moment and try again.'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
+
     final originalStatus = todo.isDone;
+    
     // Optimistically update the UI
     setState(() {
       todo.isDone = !todo.isDone;
     });
 
     try {
+      print('🔄 Toggling status for task: ${todo.title} (ID: ${todo.id})');
+      
       // Update notifications based on the new status
       if (todo.isDone) {
         // Task is now complete, cancel any pending notifications
         if (todo.id != null) {
-          await _notificationService.cancelTaskNotifications(todo.id!);
-          print('✅ Cancelled notifications for completed task: ${todo.title}');
+          try {
+            await _notificationService.cancelTaskNotifications(todo.id!);
+            print('✅ Cancelled notifications for completed task: ${todo.title}');
+          } catch (notifError) {
+            print('⚠️ Warning: Could not cancel notifications: $notifError');
+            // Don't fail the whole operation if notification cancellation fails
+          }
         }
       } else {
         // Task is now incomplete, re-schedule notification if it has a future due date
         if (todo.id != null && todo.dueDate != null && todo.dueDate!.isAfter(DateTime.now())) {
-          await _notificationService.scheduleTaskDueNotification(
-            taskId: todo.id!,
-            taskTitle: todo.title,
-            dueDate: todo.dueDate!,
-          );
-          print('🔄 Re-scheduled notification for incomplete task: ${todo.title}');
+          try {
+            await _notificationService.scheduleTaskDueNotification(
+              taskId: todo.id!,
+              taskTitle: todo.title,
+              dueDate: todo.dueDate!,
+            );
+            print('🔄 Re-scheduled notification for incomplete task: ${todo.title}');
+          } catch (notifError) {
+            print('⚠️ Warning: Could not schedule notifications: $notifError');
+            // Don't fail the whole operation if notification scheduling fails
+          }
         }
       }
 
       // Persist the change to the database
+      print('💾 Saving todo to database...');
       await _supabaseService.saveTodo(todo);
+      print('✅ Todo saved successfully');
 
-    } catch (e) {
+    } catch (e, stackTrace) {
       // If anything fails, revert the change in the UI
       setState(() {
         todo.isDone = originalStatus;
       });
-      print('Error updating todo status or notifications: $e');
+      print('❌ Error updating todo status: $e');
+      print('📍 Stack trace: $stackTrace');
+      
       if (mounted) {
+        String errorMessage = 'Error updating task';
+        if (e.toString().contains('Supabase client not initialized')) {
+          errorMessage = 'Database not ready. Please try again.';
+        } else if (e.toString().contains('network')) {
+          errorMessage = 'Network error. Check your connection.';
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating task: $e')),
+          SnackBar(
+            content: Text('$errorMessage: ${e.toString()}'),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () => _toggleToDoStatus(todo),
+            ),
+          ),
         );
       }
     }

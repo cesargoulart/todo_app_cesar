@@ -2,7 +2,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/todo_item.dart';
 
 class StorageService {
-  final _client = Supabase.instance.client;
+  static final StorageService _instance = StorageService._internal();
+  factory StorageService() => _instance;
+  StorageService._internal();
+  
+  SupabaseClient get _client => Supabase.instance.client;
+  
   Future<List<ToDoItem>> loadTodos() async {
     try {
       final response = await _client
