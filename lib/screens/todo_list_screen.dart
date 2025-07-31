@@ -26,9 +26,9 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   final NotificationService _notificationService = NotificationService();
   List<ToDoItem> _todos = [];
   bool _isLoading = true;
-  bool _showCompleted = true;
+  bool _showCompleted = false;
   bool _hideFutureTasks = false;
-  bool _hideCremesTasks = false; // Nova variável para esconder tasks com label 'Cremes'
+  bool _hideCremesTasks = true; // Nova variável para esconder tasks com label 'Cremes' (ativado por padrão)
   Label? _filterByLabel;
   List<ToDoItem> get _filteredTodos {
     List<ToDoItem> filtered = _todos;

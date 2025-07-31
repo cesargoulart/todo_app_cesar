@@ -43,8 +43,8 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  // 2. Add state to hold the current theme mode
-  ThemeMode _themeMode = ThemeMode.system;
+  // 2. Add state to hold the current theme mode (default to dark)
+  ThemeMode _themeMode = ThemeMode.dark;
 
   // 3. Create a method to change the theme
   void _changeTheme(ThemeMode themeMode) {
