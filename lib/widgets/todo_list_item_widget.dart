@@ -246,27 +246,35 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> {
                 // Subtasks section
                 if (_isExpanded && todo.subtasks.isNotEmpty)
                   Container(
-                    padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+                    padding: const EdgeInsets.only(left: 40, right: 16, bottom: 8), // Increased left padding from 16 to 40
                     child: Column(
                       children: todo.subtasks.map((subtask) {
                         return Container(
-                          margin: const EdgeInsets.only(bottom: 4),
+                          margin: const EdgeInsets.only(bottom: 2), // Reduced margin from 4 to 2
                           decoration: BoxDecoration(
-                            color: Theme.of(context).scaffoldBackgroundColor,
-                            borderRadius: BorderRadius.circular(8),
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? Colors.grey[800]?.withOpacity(0.3) // Lighter dark color for dark theme
+                                : Colors.grey[100]?.withOpacity(0.7), // Very light grey for light theme
+                            borderRadius: BorderRadius.circular(6), // Slightly smaller radius
                             border: Border.all(
-                              color: Colors.grey.withOpacity(0.3),
+                              color: Colors.grey.withOpacity(0.2), // More subtle border
+                              width: 0.5, // Thinner border
                             ),
                           ),
                           child: ListTile(
                             dense: true,
-                            leading: Checkbox(
-                              value: subtask.isDone,
-                              onChanged: (bool? value) {
-                                if (widget.onSubtaskStatusChanged != null) {
-                                  widget.onSubtaskStatusChanged!(todo, subtask);
-                                }
-                              },
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), // Reduced padding
+                            minLeadingWidth: 32, // Smaller leading width
+                            leading: Transform.scale(
+                              scale: 0.8, // Make checkbox smaller
+                              child: Checkbox(
+                                value: subtask.isDone,
+                                onChanged: (bool? value) {
+                                  if (widget.onSubtaskStatusChanged != null) {
+                                    widget.onSubtaskStatusChanged!(todo, subtask);
+                                  }
+                                },
+                              ),
                             ),
                             title: Text(
                               subtask.title,
@@ -277,26 +285,36 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> {
                                 color: subtask.isDone
                                     ? Colors.grey
                                     : Theme.of(context).textTheme.bodyMedium?.color,
-                                fontSize: 14,
+                                fontSize: 12, // Reduced from 14 to 12
                               ),
                             ),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
-                                  icon: const Icon(Icons.edit, size: 18),
+                                  icon: const Icon(Icons.edit, size: 14), // Reduced from 18 to 14
                                   onPressed: widget.onSubtaskEdit != null
                                       ? () => widget.onSubtaskEdit!(todo, subtask)
                                       : null,
                                   tooltip: 'Edit subtask',
+                                  padding: const EdgeInsets.all(4), // Smaller padding
+                                  constraints: const BoxConstraints(
+                                    minWidth: 28,
+                                    minHeight: 28,
+                                  ), // Smaller button size
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.delete, size: 18),
+                                  icon: const Icon(Icons.delete, size: 14), // Reduced from 18 to 14
                                   onPressed: widget.onSubtaskDeleted != null
                                       ? () => widget.onSubtaskDeleted!(todo, subtask)
                                       : null,
                                   tooltip: 'Delete subtask',
                                   color: Colors.red,
+                                  padding: const EdgeInsets.all(4), // Smaller padding
+                                  constraints: const BoxConstraints(
+                                    minWidth: 28,
+                                    minHeight: 28,
+                                  ), // Smaller button size
                                 ),
                               ],
                             ),
