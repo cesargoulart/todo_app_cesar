@@ -25,6 +25,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   final LabelService _labelService = LabelService();
   final NotificationService _notificationService = NotificationService();
   List<ToDoItem> _todos = [];
+  List<Label> _allLabels = []; // Added to store all available labels
   bool _isLoading = true;
   bool _showCompleted = false;
   bool _hideFutureTasks = false;
@@ -66,6 +67,18 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   void initState() {
     super.initState();
     _loadTodosFromStorage();
+    _loadAllLabels();
+  }
+
+  Future<void> _loadAllLabels() async {
+    try {
+      final labels = await _labelService.getAllLabels();
+      setState(() {
+        _allLabels = labels;
+      });
+    } catch (e) {
+      print('Error loading labels: $e');
+    }
   }
 
   bool _isServiceReady() {
@@ -777,11 +790,92 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
     );
   }
 
+  Color _parseColor(String colorString) {
+    try {
+      return Color(int.parse(colorString.replaceFirst('#', '0xFF')));
+    } catch (e) {
+      return Colors.blue;
+    }
+  }
+
+  Widget _buildLabelsDrawer() {
+    return Drawer(
+      child: Column(
+        children: [
+          const DrawerHeader(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.blue, Colors.blueAccent],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Center(
+              child: Text(
+                'Labels',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.clear_all),
+            title: const Text('Show All Tasks'),
+            onTap: () {
+              setState(() {
+                _filterByLabel = null;
+              });
+              Navigator.pop(context);
+            },
+            selected: _filterByLabel == null,
+          ),
+          const Divider(),
+          Expanded(
+            child: _allLabels.isEmpty
+                ? const Center(
+                    child: Text(
+                      'No labels available',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _allLabels.length,
+                    itemBuilder: (context, index) {
+                      final label = _allLabels[index];
+                      final isSelected = _filterByLabel?.id == label.id;
+                      
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: _parseColor(label.color),
+                          radius: 12,
+                        ),
+                        title: Text(label.name),
+                        onTap: () {
+                          setState(() {
+                            _filterByLabel = isSelected ? null : label;
+                          });
+                          Navigator.pop(context);
+                        },
+                        selected: isSelected,
+                        trailing: isSelected ? const Icon(Icons.check) : null,
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
+      drawer: _buildLabelsDrawer(), // Added the drawer here
       appBar: AppBar(
         title: const Text('Flutter To-Do List'),
         actions: [
