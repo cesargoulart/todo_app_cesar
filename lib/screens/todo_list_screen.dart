@@ -909,6 +909,8 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
             onTap: () {
               setState(() {
                 _filterByLabel = null;
+                // Also reset the 'Cremes' filter to its default (hidden)
+                _hideCremesTasks = true;
               });
               Navigator.pop(context);
             },
