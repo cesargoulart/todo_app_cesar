@@ -29,16 +29,22 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   bool _isLoading = true;
   bool _showCompleted = false;
   bool _hideFutureTasks = false;
+  bool _showOnlyTasksWithShowOnDueDate = false; // New filter state
   bool _hideCremesTasks = true; // Nova variável para esconder tasks com label 'Cremes' (ativado por padrão)
   Label? _filterByLabel;
   List<ToDoItem> get _filteredTodos {
     List<ToDoItem> filtered = _todos;
-    
+
+    // When the "show only on due date" filter is active, we start with just those tasks.
+    if (_showOnlyTasksWithShowOnDueDate) {
+      filtered = filtered.where((todo) => todo.showOnlyOnDueDate).toList();
+    }
+
     // Filter by completion status
     if (!_showCompleted) {
       filtered = filtered.where((todo) => !todo.isDone).toList();
     }
-    
+
     // Filter by future deadlines (more than 3 days away)
     if (_hideFutureTasks) {
       final threeDaysFromNow = DateTime.now().add(const Duration(days: 3));
@@ -47,7 +53,24 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
         return todo.dueDate == null || todo.dueDate!.isBefore(threeDaysFromNow);
       }).toList();
     }
-    
+
+    // Filter tasks that should only show on due date, but only if the specific filter for them is NOT active.
+    if (!_showOnlyTasksWithShowOnDueDate) {
+      final now = DateTime.now();
+      filtered = filtered.where((todo) {
+        // If showOnlyOnDueDate is true and has a due date, only show if due date is today or past
+        if (todo.showOnlyOnDueDate && todo.dueDate != null) {
+          final dueDate = DateTime(todo.dueDate!.year, todo.dueDate!.month, todo.dueDate!.day);
+          final today = DateTime(now.year, now.month, now.day);
+          return dueDate.isBefore(today) || dueDate.isAtSameMomentAs(today);
+        }
+        // Otherwise, show the task normally
+        return true;
+      }).toList();
+    }
+
+    // The logic to filter for _showOnlyTasksWithShowOnDueDate has been moved to the top.
+
     // Filter out tasks with 'Cremes' label
     if (_hideCremesTasks) {
       filtered = filtered.where((todo) => 
@@ -321,6 +344,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
 
     _textFieldController.text = existingTodo?.title ?? '';
     DateTime? selectedDueDate = existingTodo?.dueDate;
+    bool showOnlyOnDueDate = existingTodo?.showOnlyOnDueDate ?? false;
     bool isRecurring = existingTodo?.isRecurring ?? false;
     RecurrenceInterval recurrenceInterval = existingTodo?.recurrenceInterval ?? RecurrenceInterval.none;
     DateTime? recurrenceEndDate = existingTodo?.recurrenceEndDate;
@@ -382,6 +406,24 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                         )
                       ],
                     ),
+                    
+                    // Show only on due date option (only if there's a due date)
+                    if (selectedDueDate != null)
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: showOnlyOnDueDate,
+                            onChanged: (value) {
+                              setDialogState(() {
+                                showOnlyOnDueDate = value ?? false;
+                              });
+                            },
+                          ),
+                          const Expanded(
+                            child: Text('Show only on due date'),
+                          ),
+                        ],
+                      ),
                     
                     // Recurring task options (only for main tasks, not subtasks)
                     if (!isSubtask) ...[
@@ -517,6 +559,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                           // Update existing todo
                           existingTodo.title = newTitle;
                           existingTodo.dueDate = selectedDueDate;
+                          existingTodo.showOnlyOnDueDate = showOnlyOnDueDate;
                           existingTodo.isRecurring = isRecurring;
                           existingTodo.recurrenceInterval = isRecurring ? recurrenceInterval : RecurrenceInterval.none;
                           existingTodo.recurrenceEndDate = recurrenceEndDate;
@@ -554,6 +597,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                           final newTodo = ToDoItem(
                             title: newTitle,
                             dueDate: selectedDueDate,
+                            showOnlyOnDueDate: showOnlyOnDueDate,
                             isRecurring: isRecurring,
                             recurrenceInterval: isRecurring ? recurrenceInterval : RecurrenceInterval.none,
                             recurrenceEndDate: recurrenceEndDate,
@@ -1010,6 +1054,20 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                 _hideFutureTasks = !_hideFutureTasks;
               });
             },
+         ),
+         IconButton(
+           icon: Icon(
+             _showOnlyTasksWithShowOnDueDate ? Icons.visibility : Icons.visibility_off,
+             color: _showOnlyTasksWithShowOnDueDate ? Colors.blue : null,
+           ),
+           tooltip: _showOnlyTasksWithShowOnDueDate 
+               ? 'Show all tasks' 
+               : 'Show only tasks with "Show on due date"',
+           onPressed: () {
+             setState(() {
+               _showOnlyTasksWithShowOnDueDate = !_showOnlyTasksWithShowOnDueDate;
+             });
+           },
          ),
          IconButton(
            icon: Icon(_hideCremesTasks ? Icons.spa : Icons.spa_outlined),

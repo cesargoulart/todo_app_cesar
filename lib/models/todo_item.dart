@@ -50,6 +50,7 @@ class ToDoItem {
   String title;
   bool isDone;
   DateTime? dueDate;
+  bool showOnlyOnDueDate; // New field: if true, task only appears on/after due date
   String? parentId; // For subtasks
   List<ToDoItem> subtasks = []; // For subtasks
   
@@ -64,6 +65,7 @@ class ToDoItem {
     required this.title,
     this.isDone = false,
     this.dueDate,
+    this.showOnlyOnDueDate = false, // Default to false (show immediately)
     this.parentId,
     this.isRecurring = false,
     this.recurrenceInterval = RecurrenceInterval.none,
@@ -80,6 +82,7 @@ class ToDoItem {
       'title': title,
       'is_done': isDone,
       'due_date': dueDate?.toIso8601String(),
+      'show_only_on_due_date': showOnlyOnDueDate,
       'parent_id': parentId,
       'is_recurring': isRecurring,
       'recurrence_interval': recurrenceInterval != RecurrenceInterval.none ? recurrenceInterval.value : null,
@@ -109,6 +112,7 @@ class ToDoItem {
       title: json['title'],
       isDone: json['is_done'] ?? false,
       dueDate: json['due_date'] != null ? DateTime.parse(json['due_date']) : null,
+      showOnlyOnDueDate: json['show_only_on_due_date'] ?? false,
       parentId: json['parent_id'],
       isRecurring: json['is_recurring'] ?? false,
       recurrenceInterval: RecurrenceInterval.fromString(json['recurrence_interval']),
