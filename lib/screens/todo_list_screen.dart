@@ -675,6 +675,44 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
     _showAddOrEditToDoDialog(existingTodo: subtask, isSubtask: true, parentTodo: parentTodo);
   }
 
+  // Uncheck all tasks that contain a specific label
+  Future<void> _uncheckAllTasksForLabel(Label label) async {
+    try {
+      // Find tasks currently loaded in memory with this label
+      final tasksToUncheck = _todos.where((t) => t.labels.any((l) => l.id == label.id) && t.isDone).toList();
+
+      if (tasksToUncheck.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No completed Cremes tasks to uncheck.')));
+        }
+        return;
+      }
+
+      // Update each task locally and in the database
+      for (final task in tasksToUncheck) {
+        task.isDone = false;
+      }
+
+      // Persist changes in batch
+      await _supabaseService.saveTodos(tasksToUncheck);
+
+      // Refresh full todo list from storage to ensure consistency
+      final refreshed = await _supabaseService.loadTodos();
+      setState(() {
+        _todos = refreshed;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unchecked ${tasksToUncheck.length} tasks.')));
+      }
+    } catch (e) {
+      print('Error unchecking tasks: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error unchecking tasks: $e')));
+      }
+    }
+  }
+
   // Update task labels in database
   Future<void> _updateTaskLabels(String taskId, List<Label> labels) async {
     try {
@@ -869,6 +907,39 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                     },
                   ),
           ),
+          // Show an action button at the bottom when the 'Cremes' label is selected
+          if (_filterByLabel != null && _filterByLabel!.name.toLowerCase() == 'cremes')
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(44),
+                ),
+                icon: const Icon(Icons.check_box_outline_blank),
+                label: const Text('Uncheck all Cremes tasks'),
+                onPressed: () async {
+                  // Confirm before running
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) {
+                      return AlertDialog(
+                        title: const Text('Confirm'),
+                        content: const Text('Uncheck all tasks with label "Cremes"?'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('CANCEL')),
+                          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('OK')),
+                        ],
+                      );
+                    },
+                  );
+
+                  if (confirm == true) {
+                    await _uncheckAllTasksForLabel(_filterByLabel!);
+                    Navigator.pop(context); // close drawer after action
+                  }
+                },
+              ),
+            ),
         ],
       ),
     );
@@ -880,6 +951,38 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
 
     return Scaffold(
       drawer: _buildLabelsDrawer(), // Added the drawer here
+      // Show a bottom bar with action when filtered by Cremes
+      bottomNavigationBar: (_filterByLabel != null && _filterByLabel!.name.toLowerCase() == 'cremes')
+          ? SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.check_box_outline_blank),
+                  label: const Text('Uncheck all Cremes tasks'),
+                  style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) {
+                        return AlertDialog(
+                          title: const Text('Confirm'),
+                          content: const Text('Uncheck all tasks with label "Cremes"?'),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('CANCEL')),
+                            TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('OK')),
+                          ],
+                        );
+                      },
+                    );
+
+                    if (confirm == true) {
+                      await _uncheckAllTasksForLabel(_filterByLabel!);
+                    }
+                  },
+                ),
+              ),
+            )
+          : null,
       appBar: AppBar(
         title: const Text('Flutter To-Do List'),
         actions: [
