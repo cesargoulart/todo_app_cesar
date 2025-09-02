@@ -855,6 +855,10 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                         title: Text(label.name),
                         onTap: () {
                           setState(() {
+                            // If user taps the 'Cremes' label, ensure Cremes tasks are visible
+                            if ((label.name).toLowerCase() == 'cremes') {
+                              _hideCremesTasks = false;
+                            }
                             _filterByLabel = isSelected ? null : label;
                           });
                           Navigator.pop(context);
