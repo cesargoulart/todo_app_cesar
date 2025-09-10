@@ -7,6 +7,7 @@ import '../services/supabase_service.dart'; // Updated import
 import '../services/label_service.dart';
 import '../services/notification_service.dart';
 import '../services/auto_update_service.dart';
+import '../services/database_sync_service.dart'; // Novo serviço de sincronização
 import '../widgets/todo_list_item_widget.dart';
 import '../widgets/label_picker_widget.dart';
 
@@ -24,9 +25,11 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   final LabelService _labelService = LabelService();
   final NotificationService _notificationService = NotificationService();
+  final DatabaseSyncService _syncService = DatabaseSyncService(); // Novo serviço
   List<ToDoItem> _todos = [];
   List<Label> _allLabels = []; // Added to store all available labels
   bool _isLoading = true;
+  bool _isSyncing = false; // Indicador de sincronização
   bool _showCompleted = false;
   bool _hideFutureTasks = false;
   bool _showOnlyTasksWithShowOnDueDate = false; // New filter state
@@ -89,8 +92,15 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   @override
   void initState() {
     super.initState();
-    _loadTodosFromStorage();
+    _initializeSyncService();
     _loadAllLabels();
+  }
+
+  @override
+  void dispose() {
+    _syncService.dispose();
+    _textFieldController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadAllLabels() async {
@@ -115,16 +125,49 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
     }
   }
 
+  /// Inicializa o serviço de sincronização com callbacks
+  Future<void> _initializeSyncService() async {
+    await _syncService.initialize(
+      onDataUpdated: (todos) {
+        if (mounted) {
+          setState(() {
+            _todos = todos;
+            _isLoading = false;
+          });
+        }
+      },
+      onSyncError: (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Erro na sincronização: $error'),
+              backgroundColor: Colors.red,
+              action: SnackBarAction(
+                label: 'Tentar novamente',
+                onPressed: () => _syncService.forceSync(),
+              ),
+            ),
+          );
+        }
+      },
+      onSyncStatusChanged: (isSyncing) {
+        if (mounted) {
+          setState(() {
+            _isSyncing = isSyncing;
+          });
+        }
+      },
+    );
+  }
+
   Future<void> _loadTodosFromStorage() async {
-    final loadedTodos = await _supabaseService.loadTodos();
-    setState(() {
-      _todos = loadedTodos;
-      _isLoading = false;
-    });
+    // Agora usa o serviço de sincronização
+    await _syncService.forceSync();
   }
 
   Future<void> _saveTodosToStorage() async {
-    await _supabaseService.saveTodos(_todos);
+    // Usa o serviço de sincronização com proteção
+    await _syncService.saveTodosSafely(_todos);
   }
 
   void _toggleToDoStatus(ToDoItem todo) async {
@@ -180,9 +223,9 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
         }
       }
 
-      // Persist the change to the database
-      print('💾 Saving todo to database...');
-      await _supabaseService.saveTodo(todo);
+      // Persist the change to the database with protection
+      print('💾 Saving todo to database with protection...');
+      await _syncService.saveTodoSafely(todo);
       print('✅ Todo saved successfully');
 
     } catch (e, stackTrace) {
@@ -250,11 +293,8 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                     if (todo.id != null) {
                       // First, cancel any pending notifications for this task
                       await _notificationService.cancelTaskNotifications(todo.id!);
-                      await _supabaseService.deleteTodo(todo.id!);
+                      await _syncService.deleteTodoSafely(todo.id!);
                     }
-                    setState(() {
-                      _todos.removeWhere((item) => item.id == todo.id);
-                    });
                     Navigator.of(context).pop();
                     
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -277,13 +317,15 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                 onPressed: () async {
                   try {
                     if (todo.id != null) {
-                      await _supabaseService.deleteRecurringTask(todo.id!, deleteInstances: true);
+                      await _syncService.wrapUserOperation(() async {
+                        await _supabaseService.deleteRecurringTask(todo.id!, deleteInstances: true);
+                        // Remove the original task and all its instances from local state
+                        setState(() {
+                          _todos.removeWhere((item) => 
+                            item.id == todo.id || item.originalRecurringTaskId == todo.id);
+                        });
+                      });
                     }
-                    setState(() {
-                      // Remove the original task and all its instances
-                      _todos.removeWhere((item) => 
-                        item.id == todo.id || item.originalRecurringTaskId == todo.id);
-                    });
                     Navigator.of(context).pop();
                     
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -309,11 +351,8 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                     if (todo.id != null) {
                       // First, cancel any pending notifications for this task
                       await _notificationService.cancelTaskNotifications(todo.id!);
-                      await _supabaseService.deleteTodo(todo.id!);
+                      await _syncService.deleteTodoSafely(todo.id!);
                     }
-                    setState(() {
-                      _todos.removeWhere((item) => item.id == todo.id);
-                    });
                     Navigator.of(context).pop();
                     
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -571,7 +610,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                             existingTodo.nextOccurrenceDate = null;
                           }
                           
-                          final updatedTodo = await _supabaseService.saveTodo(existingTodo);
+                          final updatedTodo = await _syncService.saveTodoSafely(existingTodo);
                           
                           // Update task labels in database
                           await _updateTaskLabels(updatedTodo.id!, selectedLabels);
@@ -622,12 +661,12 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                           }
                           if (isSubtask && parentTodo != null) {
                             newTodo.parentId = parentTodo.id;
-                            final savedSubtask = await _supabaseService.saveTodo(newTodo);
+                            final savedSubtask = await _syncService.saveTodoSafely(newTodo);
                             setState(() {
                               parentTodo.addSubtask(savedSubtask);
                             });
                           } else {
-                            final savedTodo = await _supabaseService.saveTodo(newTodo);
+                            final savedTodo = await _syncService.saveTodoSafely(newTodo);
                             // Update task labels in database
                             await _updateTaskLabels(savedTodo.id!, selectedLabels);
                             savedTodo.labels = selectedLabels;  // Set the labels on the todo item
@@ -641,9 +680,8 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                               );
                             }
 
-                            setState(() {
-                              _todos.add(savedTodo);
-                            });
+                            // O serviço de sincronização já atualizou _todos via callback
+                            // Não precisamos adicionar manualmente
                           }
                         }
                       } catch (e) {
@@ -732,19 +770,18 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
         return;
       }
 
-      // Update each task locally and in the database
-      for (final task in tasksToUncheck) {
-        task.isDone = false;
-      }
-
-      // Persist changes in batch
-      await _supabaseService.saveTodos(tasksToUncheck);
-
-      // Refresh full todo list from storage to ensure consistency
-      final refreshed = await _supabaseService.loadTodos();
-      setState(() {
-        _todos = refreshed;
+      // Update each task locally and in the database with protection
+      await _syncService.wrapUserOperation(() async {
+        for (final task in tasksToUncheck) {
+          task.isDone = false;
+        }
+        
+        // Persist changes in batch
+        await _supabaseService.saveTodos(tasksToUncheck);
       });
+
+      // Força uma sincronização para atualizar a UI
+      await _syncService.forceSync();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unchecked ${tasksToUncheck.length} tasks.')));
@@ -785,11 +822,74 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Notification Debug Menu'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final syncStatus = _syncService.getStatus();
+            return AlertDialog(
+              title: const Text('Debug Menu'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Seção de Status de Sincronização
+                    const Text(
+                      'Status de Sincronização',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('• Sincronização automática: ${syncStatus['autoSyncActive'] ? "Ativa" : "Pausada"}'),
+                            Text('• Sincronizando agora: ${syncStatus['isSyncing'] ? "Sim" : "Não"}'),
+                            Text('• Operação em andamento: ${syncStatus['isUserOperating'] ? "Sim" : "Não"}'),
+                            Text('• Total de tarefas: ${syncStatus['currentTodosCount']}'),
+                            if (syncStatus['lastSyncTime'] != null)
+                              Text('• Última sync: ${DateTime.parse(syncStatus['lastSyncTime']).toLocal().toString().substring(11, 16)}'),
+                            if (syncStatus['pendingSyncQueue'] > 0)
+                              Text('• Filas pendentes: ${syncStatus['pendingSyncQueue']}', 
+                                style: const TextStyle(color: Colors.orange)),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ListTile(
+                      leading: Icon(
+                        syncStatus['autoSyncActive'] ? Icons.pause : Icons.play_arrow,
+                        color: syncStatus['autoSyncActive'] ? Colors.orange : Colors.green,
+                      ),
+                      title: Text(syncStatus['autoSyncActive'] ? 'Pausar Sincronização' : 'Retomar Sincronização'),
+                      subtitle: const Text('Controla a atualização automática'),
+                      onTap: () {
+                        if (syncStatus['autoSyncActive']) {
+                          _syncService.stopAutoSync();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Sincronização automática pausada')),
+                          );
+                        } else {
+                          _syncService.startAutoSync();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Sincronização automática retomada')),
+                          );
+                        }
+                        Navigator.of(context).pop();
+                        // Reabrir o diálogo para mostrar o novo status
+                        Future.delayed(const Duration(milliseconds: 100), () {
+                          _showDebugDialog();
+                        });
+                      },
+                    ),
+                    const Divider(),
+                    const Text(
+                      'Testes de Notificação',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
               ListTile(
                 leading: const Icon(Icons.timer_outlined),
                 title: const Text('Schedule Test (10s)'),
@@ -857,16 +957,19 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                   }
                 },
               ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              child: const Text('CLOSE'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-          ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  child: const Text('FECHAR'),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -997,6 +1100,59 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
 
     return Scaffold(
       drawer: _buildLabelsDrawer(), // Added the drawer here
+      // Mostra indicador de sincronização na parte superior
+      body: Column(
+        children: [
+          // Barra de status de sincronização
+          if (_isSyncing)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              color: Colors.blue.withOpacity(0.1),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Sincronizando base de dados...',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          // Conteúdo principal
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : RefreshIndicator(
+                    onRefresh: () async {
+                      await _syncService.forceSync();
+                    },
+                    child: ListView.builder(
+                      itemCount: _filteredTodos.length,
+                      itemBuilder: (context, index) {
+                        final todo = _filteredTodos[index];
+                        return ToDoListItemWidget(
+                          todo: todo,
+                          onStatusChanged: () => _toggleToDoStatus(todo),
+                          onDismissed: () => _deleteToDoItem(todo),
+                          onEdit: () => _showAddOrEditToDoDialog(existingTodo: todo),
+                          onAddSubtask: _addSubtask,
+                          onSubtaskStatusChanged: _toggleSubtaskStatus,
+                          onSubtaskDeleted: _deleteSubtask,
+                          onSubtaskEdit: _editSubtask,
+                        );
+                      },
+                    ),
+                  ),
+          ),
+        ],
+      ),
       // Show a bottom bar with action when filtered by Cremes
       bottomNavigationBar: (_filterByLabel != null && _filterByLabel!.name.toLowerCase() == 'cremes')
           ? SafeArea(
@@ -1030,7 +1186,23 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
             )
           : null,
       appBar: AppBar(
-        title: const Text('Flutter To-Do List'),
+        title: Row(
+          children: [
+            const Text('Flutter To-Do List'),
+            const SizedBox(width: 8),
+            if (_syncService.timeSinceLastSync != null)
+              Tooltip(
+                message: 'Última sincronização há ${_syncService.timeSinceLastSync!.inMinutes} minuto(s)',
+                child: Icon(
+                  Icons.sync,
+                  size: 16,
+                  color: _syncService.needsSync 
+                    ? Colors.orange.withOpacity(0.7)
+                    : Colors.green.withOpacity(0.7),
+                ),
+              ),
+          ],
+        ),
         actions: [
           IconButton(
             icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
@@ -1081,6 +1253,16 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
            },
          ),
          IconButton(
+           icon: Icon(
+             Icons.refresh,
+             color: _isSyncing ? Colors.blue : null,
+           ),
+           tooltip: 'Sincronizar agora',
+           onPressed: _isSyncing ? null : () async {
+             await _syncService.forceSync();
+           },
+         ),
+         IconButton(
            icon: const Icon(Icons.system_update),
            tooltip: 'Check for updates',
            onPressed: () async {
@@ -1095,24 +1277,6 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
-              itemCount: _filteredTodos.length,
-              itemBuilder: (context, index) {
-                final todo = _filteredTodos[index];
-                return ToDoListItemWidget(
-                  todo: todo,
-                  onStatusChanged: () => _toggleToDoStatus(todo),
-                  onDismissed: () => _deleteToDoItem(todo),
-                  onEdit: () => _showAddOrEditToDoDialog(existingTodo: todo),
-                  onAddSubtask: _addSubtask,
-                  onSubtaskStatusChanged: _toggleSubtaskStatus,
-                  onSubtaskDeleted: _deleteSubtask,
-                  onSubtaskEdit: _editSubtask,
-                );
-              },
-            ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showAddOrEditToDoDialog(),
         tooltip: 'Add To-Do',
