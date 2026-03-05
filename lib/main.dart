@@ -6,7 +6,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'supabase_credentials.dart';
 import 'services/notification_service.dart';
 import 'services/auto_update_service.dart';
-import 'services/simple_notification_test.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   

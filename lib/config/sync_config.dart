@@ -34,14 +34,14 @@ class SyncConfig {
   // ==========================================
   
   /// Iniciar sincronização automática ao abrir o app
-  static const bool startSyncOnInit = true;
+  static const bool startSyncOnInit = false;
   
   /// Fazer sincronização silenciosa (sem logs)
   static const bool silentSync = false;
   
   /// Sincronizar automaticamente após operações do usuário
   /// Se true, sincroniza após cada operação de escrita
-  /// Se false, aguarda o próximo ciclo automático
+  /// Se false, aguarda sincronização manual
   static const bool syncAfterUserOperation = false;
   
   /// Mostrar notificação quando sincronização falhar

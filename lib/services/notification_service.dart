@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
@@ -249,6 +250,54 @@ class NotificationService {
       ),
       payload: 'task_completed',
     );
+  }
+
+  /// Show an immediate deadline alert notification
+  Future<void> showImmediateDeadlineAlert({
+    required String taskId,
+    required String taskTitle,
+    required bool isOverdue,
+  }) async {
+    try {
+      print('🔔 Showing immediate deadline alert for: $taskTitle (${isOverdue ? 'OVERDUE' : 'DUE NOW'})');
+
+      await _notifications.show(
+        taskId.hashCode + (isOverdue ? 1000000 : 0), // Unique ID for deadline alerts
+        isOverdue ? 'Task Overdue! ⚠️' : 'Task Due Now! 🔔',
+        'Task "$taskTitle" ${isOverdue ? 'is overdue' : 'is due now'}',
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            _channelId,
+            _channelName,
+            channelDescription: _channelDescription,
+            importance: Importance.max,
+            priority: Priority.high,
+            playSound: true,
+            enableVibration: true,
+            ticker: isOverdue ? 'Task Overdue' : 'Task Due',
+            showWhen: true,
+            category: AndroidNotificationCategory.alarm,
+            fullScreenIntent: true,
+            icon: '@mipmap/ic_launcher',
+            color: isOverdue ? const Color(0xFFEF4444) : const Color(0xFFF59E0B),
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+            interruptionLevel: isOverdue
+                ? InterruptionLevel.critical
+                : InterruptionLevel.timeSensitive,
+          ),
+        ),
+        payload: 'deadline_alert:$taskId',
+      );
+
+      print('✅ Immediate deadline alert shown successfully');
+    } catch (e, stackTrace) {
+      print('❌ Error showing immediate deadline alert: $e');
+      print('📍 Stack trace: $stackTrace');
+    }
   }
 
   /// Cancel all notifications for a specific task

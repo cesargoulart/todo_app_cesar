@@ -8,6 +8,7 @@ import '../services/label_service.dart';
 import '../services/notification_service.dart';
 import '../services/auto_update_service.dart';
 import '../services/database_sync_service.dart'; // Novo serviço de sincronização
+import '../services/deadline_monitor_service.dart';
 import '../widgets/todo_list_item_widget.dart';
 import '../widgets/label_picker_widget.dart';
 
@@ -26,6 +27,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   final LabelService _labelService = LabelService();
   final NotificationService _notificationService = NotificationService();
   final DatabaseSyncService _syncService = DatabaseSyncService(); // Novo serviço
+  final DeadlineMonitorService _deadlineMonitor = DeadlineMonitorService();
   List<ToDoItem> _todos = [];
   List<Label> _allLabels = []; // Added to store all available labels
   bool _isLoading = true;
@@ -97,7 +99,15 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Initialize deadline monitor with context
+    _deadlineMonitor.initialize(context);
+  }
+
+  @override
   void dispose() {
+    _deadlineMonitor.dispose();
     _syncService.dispose();
     _textFieldController.dispose();
     super.dispose();
@@ -134,6 +144,9 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
             _todos = todos;
             _isLoading = false;
           });
+          // Update deadline monitor with latest tasks and start monitoring
+          _deadlineMonitor.updateTasks(_todos);
+          _deadlineMonitor.startMonitoring(_todos);
         }
       },
       onSyncError: (error) {
@@ -158,11 +171,6 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
         }
       },
     );
-  }
-
-  Future<void> _loadTodosFromStorage() async {
-    // Agora usa o serviço de sincronização
-    await _syncService.forceSync();
   }
 
   Future<void> _saveTodosToStorage() async {
@@ -200,6 +208,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
         if (todo.id != null) {
           try {
             await _notificationService.cancelTaskNotifications(todo.id!);
+            _deadlineMonitor.clearTaskAlert(todo.id!);
             print('✅ Cancelled notifications for completed task: ${todo.title}');
           } catch (notifError) {
             print('⚠️ Warning: Could not cancel notifications: $notifError');
@@ -292,11 +301,17 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                   try {
                     if (todo.id != null) {
                       // First, cancel any pending notifications for this task
-                      await _notificationService.cancelTaskNotifications(todo.id!);
+                      try {
+                        await _notificationService.cancelTaskNotifications(todo.id!);
+                        _deadlineMonitor.clearTaskAlert(todo.id!);
+                      } catch (notifError) {
+                        print('Warning: Could not cancel notifications: $notifError');
+                        // Continue with deletion even if notification cancellation fails
+                      }
                       await _syncService.deleteTodoSafely(todo.id!);
                     }
                     Navigator.of(context).pop();
-                    
+
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text('Task "${todo.title}" deleted'),
@@ -350,11 +365,17 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                   try {
                     if (todo.id != null) {
                       // First, cancel any pending notifications for this task
-                      await _notificationService.cancelTaskNotifications(todo.id!);
+                      try {
+                        await _notificationService.cancelTaskNotifications(todo.id!);
+                        _deadlineMonitor.clearTaskAlert(todo.id!);
+                      } catch (notifError) {
+                        print('Warning: Could not cancel notifications: $notifError');
+                        // Continue with deletion even if notification cancellation fails
+                      }
                       await _syncService.deleteTodoSafely(todo.id!);
                     }
                     Navigator.of(context).pop();
-                    
+
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text('Task "${todo.title}" deleted'),
@@ -1101,57 +1122,144 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
     return Scaffold(
       drawer: _buildLabelsDrawer(), // Added the drawer here
       // Mostra indicador de sincronização na parte superior
-      body: Column(
-        children: [
-          // Barra de status de sincronização
-          if (_isSyncing)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              color: Colors.blue.withOpacity(0.1),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  SizedBox(width: 8),
-                  Text(
-                    'Sincronizando base de dados...',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-          // Conteúdo principal
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : RefreshIndicator(
-                    onRefresh: () async {
-                      await _syncService.forceSync();
-                    },
-                    child: ListView.builder(
-                      itemCount: _filteredTodos.length,
-                      itemBuilder: (context, index) {
-                        final todo = _filteredTodos[index];
-                        return ToDoListItemWidget(
-                          todo: todo,
-                          onStatusChanged: () => _toggleToDoStatus(todo),
-                          onDismissed: () => _deleteToDoItem(todo),
-                          onEdit: () => _showAddOrEditToDoDialog(existingTodo: todo),
-                          onAddSubtask: _addSubtask,
-                          onSubtaskStatusChanged: _toggleSubtaskStatus,
-                          onSubtaskDeleted: _deleteSubtask,
-                          onSubtaskEdit: _editSubtask,
-                        );
-                      },
-                    ),
-                  ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDarkMode
+                ? [
+                    const Color(0xFF0F172A),
+                    const Color(0xFF1E293B),
+                    const Color(0xFF0F172A),
+                  ]
+                : [
+                    const Color(0xFFF5F7FA),
+                    const Color(0xFFE8EAF6),
+                    const Color(0xFFF5F7FA),
+                  ],
           ),
-        ],
+        ),
+        child: Column(
+          children: [
+            // Barra de status de sincronização
+            if (_isSyncing)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: isDarkMode
+                        ? [
+                            Colors.blue.withOpacity(0.2),
+                            Colors.purple.withOpacity(0.2),
+                          ]
+                        : [
+                            Colors.blue.withOpacity(0.1),
+                            Colors.purple.withOpacity(0.1),
+                          ],
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Theme.of(context).primaryColor,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    const Text(
+                      'Sincronizando base de dados...',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              ),
+            // Conteúdo principal
+            Expanded(
+              child: _isLoading
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Theme.of(context).primaryColor,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Loading your tasks...',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7),
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : RefreshIndicator(
+                      onRefresh: () async {
+                        await _syncService.forceSync();
+                      },
+                      color: Theme.of(context).primaryColor,
+                      child: _filteredTodos.isEmpty
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.task_alt,
+                                    size: 80,
+                                    color: Theme.of(context).primaryColor.withOpacity(0.3),
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'No tasks yet!',
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                      color: Theme.of(context).textTheme.bodyLarge?.color,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Tap the + button to add your first task',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : ListView.builder(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              itemCount: _filteredTodos.length,
+                              itemBuilder: (context, index) {
+                                final todo = _filteredTodos[index];
+                                return ToDoListItemWidget(
+                                  todo: todo,
+                                  onStatusChanged: () => _toggleToDoStatus(todo),
+                                  onDismissed: () => _deleteToDoItem(todo),
+                                  onEdit: () => _showAddOrEditToDoDialog(existingTodo: todo),
+                                  onAddSubtask: _addSubtask,
+                                  onSubtaskStatusChanged: _toggleSubtaskStatus,
+                                  onSubtaskDeleted: _deleteSubtask,
+                                  onSubtaskEdit: _editSubtask,
+                                );
+                              },
+                            ),
+                    ),
+            ),
+          ],
+        ),
       ),
       // Show a bottom bar with action when filtered by Cremes
       bottomNavigationBar: (_filterByLabel != null && _filterByLabel!.name.toLowerCase() == 'cremes')
@@ -1186,23 +1294,69 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
             )
           : null,
       appBar: AppBar(
+        flexibleSpace: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDarkMode
+                  ? [
+                      const Color(0xFF1E293B),
+                      const Color(0xFF334155),
+                    ]
+                  : [
+                      const Color(0xFF6366F1),
+                      const Color(0xFF8B5CF6),
+                    ],
+            ),
+          ),
+        ),
         title: Row(
           children: [
-            const Text('Flutter To-Do List'),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                Icons.check_circle_outline,
+                size: 20,
+                color: isDarkMode ? Colors.white : Colors.white,
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              'My Tasks',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 20,
+                color: Colors.white,
+              ),
+            ),
             const SizedBox(width: 8),
             if (_syncService.timeSinceLastSync != null)
               Tooltip(
                 message: 'Última sincronização há ${_syncService.timeSinceLastSync!.inMinutes} minuto(s)',
-                child: Icon(
-                  Icons.sync,
-                  size: 16,
-                  color: _syncService.needsSync 
-                    ? Colors.orange.withOpacity(0.7)
-                    : Colors.green.withOpacity(0.7),
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: _syncService.needsSync
+                        ? Colors.orange.withOpacity(0.3)
+                        : Colors.green.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Icon(
+                    Icons.sync,
+                    size: 14,
+                    color: Colors.white,
+                  ),
                 ),
               ),
           ],
         ),
+        iconTheme: const IconThemeData(color: Colors.white),
+        actionsIconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(
             icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
@@ -1277,10 +1431,37 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddOrEditToDoDialog(),
-        tooltip: 'Add To-Do',
-        child: const Icon(Icons.add),
+      floatingActionButton: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDarkMode
+                ? [
+                    const Color(0xFF818CF8),
+                    const Color(0xFF8B5CF6),
+                  ]
+                : [
+                    const Color(0xFF6366F1),
+                    const Color(0xFF8B5CF6),
+                  ],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Theme.of(context).primaryColor.withOpacity(0.4),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: FloatingActionButton(
+          onPressed: () => _showAddOrEditToDoDialog(),
+          tooltip: 'Add To-Do',
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: const Icon(Icons.add, size: 28, color: Colors.white),
+        ),
       ),
     );
   }

@@ -141,8 +141,14 @@ class SupabaseService {
   Future<void> deleteTodo(String id) async {
     try {
       // Cancel any scheduled notifications for this task
-      await _notificationService.cancelTaskNotifications(id);
-      
+      // Wrap in try-catch to prevent notification errors from blocking deletion
+      try {
+        await _notificationService.cancelTaskNotifications(id);
+      } catch (notifError) {
+        print('Warning: Could not cancel notifications during deletion: $notifError');
+        // Continue with deletion even if notification cancellation fails
+      }
+
       await _client.from(_tableName).delete().eq('id', id);
     } catch (e) {
       print('Error deleting todo: $e');
@@ -157,22 +163,28 @@ class SupabaseService {
           .from(_tableName)
           .update({'is_done': isDone})
           .eq('id', id);
-      
-      if (isDone) {
-        // Cancel notifications when task is completed
-        await _notificationService.cancelTaskNotifications(id);
-        
-        // Show completion notification (optional)
-        final todo = await _getTaskById(id);
-        if (todo != null) {
-          await _notificationService.showTaskCompletedNotification(taskTitle: todo.title);
+
+      // Handle notifications with error protection
+      try {
+        if (isDone) {
+          // Cancel notifications when task is completed
+          await _notificationService.cancelTaskNotifications(id);
+
+          // Show completion notification (optional)
+          final todo = await _getTaskById(id);
+          if (todo != null) {
+            await _notificationService.showTaskCompletedNotification(taskTitle: todo.title);
+          }
+        } else {
+          // Re-schedule notifications when task is marked as not done
+          final todo = await _getTaskById(id);
+          if (todo != null && todo.dueDate != null) {
+            await _scheduleNotificationsForTask(todo);
+          }
         }
-      } else {
-        // Re-schedule notifications when task is marked as not done
-        final todo = await _getTaskById(id);
-        if (todo != null && todo.dueDate != null) {
-          await _scheduleNotificationsForTask(todo);
-        }
+      } catch (notifError) {
+        print('Warning: Notification error during status update: $notifError');
+        // Continue - status update was successful even if notifications failed
       }
     } catch (e) {
       print('Error updating todo status: $e');
