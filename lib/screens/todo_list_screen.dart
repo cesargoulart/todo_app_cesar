@@ -48,7 +48,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
 
   // Filters
   bool _showCompleted = false;
-  bool _hideFutureTasks = false;
+  bool _hideFutureTasks = true;
   bool _showOnlyTasksWithShowOnDueDate = false;
   bool _hideCremesTasks = true;
   Label? _filterByLabel;
@@ -57,19 +57,6 @@ class _ToDoListScreenState extends State<ToDoListScreen>
   // Header animation
   late AnimationController _headerCtrl;
   late Animation<double> _headerFade;
-
-  // ── Computed ─────────────────────────────────────────────────────────────────
-  int get _totalCount => _todos.where((t) => !t.isDone).length;
-  int get _doneCount => _todos.where((t) => t.isDone).length;
-  int get _overdueCount =>
-      _todos
-          .where(
-            (t) =>
-                !t.isDone &&
-                t.dueDate != null &&
-                t.dueDate!.isBefore(DateTime.now()),
-          )
-          .length;
 
   List<ToDoItem> get _filteredTodos {
     List<ToDoItem> filtered = List.from(_todos);
@@ -1259,6 +1246,57 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                 const Spacer(),
                 _IconAction(
                   icon:
+                      _hideFutureTasks
+                          ? Icons.event_available
+                          : Icons.event_busy,
+                  active: _hideFutureTasks,
+                  onTap:
+                      () =>
+                          setState(() => _hideFutureTasks = !_hideFutureTasks),
+                ),
+                const SizedBox(width: 8),
+                _IconAction(
+                  icon:
+                      _showOnlyTasksWithShowOnDueDate
+                          ? Icons.visibility
+                          : Icons.visibility_off,
+                  active: _showOnlyTasksWithShowOnDueDate,
+                  onTap:
+                      () => setState(
+                        () =>
+                            _showOnlyTasksWithShowOnDueDate =
+                                !_showOnlyTasksWithShowOnDueDate,
+                      ),
+                ),
+                const SizedBox(width: 8),
+                _IconAction(
+                  icon: _hideCremesTasks ? Icons.spa : Icons.spa_outlined,
+                  active: _hideCremesTasks,
+                  onTap:
+                      () =>
+                          setState(() => _hideCremesTasks = !_hideCremesTasks),
+                ),
+                const SizedBox(width: 8),
+                _IconAction(
+                  icon: Icons.system_update_outlined,
+                  onTap:
+                      () async => await AutoUpdateService().manualUpdateCheck(),
+                ),
+                const SizedBox(width: 8),
+            
+                _IconAction(
+                  icon: Icons.brightness_6_outlined,
+                  onTap: () {
+                    final isDark =
+                        Theme.of(context).brightness == Brightness.dark;
+                    widget.onThemeModeChanged(
+                      isDark ? ThemeMode.light : ThemeMode.dark,
+                    );
+                  },
+                ),
+                const SizedBox(width: 8),
+                _IconAction(
+                  icon:
                       _showCompleted
                           ? Icons.visibility_off_outlined
                           : Icons.visibility_outlined,
@@ -1270,11 +1308,6 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                   icon: Icons.sync_rounded,
                   loading: _isSyncing,
                   onTap: _isSyncing ? null : () => _syncService.forceSync(),
-                ),
-                const SizedBox(width: 8),
-                _IconAction(
-                  icon: Icons.more_vert_rounded,
-                  onTap: () => _showMoreMenu(),
                 ),
               ],
             ),
@@ -1507,107 +1540,6 @@ class _ToDoListScreenState extends State<ToDoListScreen>
       ),
     );
   }
-
-  void _showMoreMenu() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.bgSurface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(AppRadius.card),
-        ),
-      ),
-      builder:
-          (_) => SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 36,
-                  height: 4,
-                  margin: const EdgeInsets.only(top: 12, bottom: 8),
-                  decoration: BoxDecoration(
-                    color: AppColors.borderCard,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                _BottomSheetTile(
-                  icon:
-                      _hideFutureTasks
-                          ? Icons.event_available
-                          : Icons.event_busy,
-                  label:
-                      _hideFutureTasks
-                          ? 'Show future tasks'
-                          : 'Hide tasks due 3+ days',
-                  onTap: () {
-                    setState(() => _hideFutureTasks = !_hideFutureTasks);
-                    Navigator.pop(context);
-                  },
-                ),
-                _BottomSheetTile(
-                  icon:
-                      _showOnlyTasksWithShowOnDueDate
-                          ? Icons.visibility
-                          : Icons.visibility_off,
-                  label:
-                      _showOnlyTasksWithShowOnDueDate
-                          ? 'Show all tasks'
-                          : 'Show only "on due date" tasks',
-                  onTap: () {
-                    setState(
-                      () =>
-                          _showOnlyTasksWithShowOnDueDate =
-                              !_showOnlyTasksWithShowOnDueDate,
-                    );
-                    Navigator.pop(context);
-                  },
-                ),
-                _BottomSheetTile(
-                  icon: _hideCremesTasks ? Icons.spa : Icons.spa_outlined,
-                  label:
-                      _hideCremesTasks
-                          ? 'Show Cremes tasks'
-                          : 'Hide Cremes tasks',
-                  onTap: () {
-                    setState(() => _hideCremesTasks = !_hideCremesTasks);
-                    Navigator.pop(context);
-                  },
-                ),
-                _BottomSheetTile(
-                  icon: Icons.system_update_outlined,
-                  label: 'Check for updates',
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await AutoUpdateService().manualUpdateCheck();
-                  },
-                ),
-                _BottomSheetTile(
-                  icon: Icons.science_outlined,
-                  label: 'Debug notifications',
-                  onTap: () {
-                    Navigator.pop(context);
-                    _showDebugDialog();
-                  },
-                ),
-                _BottomSheetTile(
-                  icon: Icons.brightness_6_outlined,
-                  label: 'Toggle theme',
-                  onTap: () {
-                    final isDark =
-                        Theme.of(context).brightness == Brightness.dark;
-                    widget.onThemeModeChanged(
-                      isDark ? ThemeMode.light : ThemeMode.dark,
-                    );
-                    Navigator.pop(context);
-                  },
-                ),
-                const SizedBox(height: 8),
-              ],
-            ),
-          ),
-    );
-  }
 }
 
 // ── Reusable small widgets ─────────────────────────────────────────────────────
@@ -1702,30 +1634,6 @@ class _CheckRow extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _BottomSheetTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  const _BottomSheetTile({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: Icon(icon, color: AppColors.textSecondary, size: 20),
-      title: Text(
-        label,
-        style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
-      ),
-      onTap: onTap,
     );
   }
 }
