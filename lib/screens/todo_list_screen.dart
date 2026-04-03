@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/todo_item.dart';
@@ -399,8 +400,10 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
 
   void _showAddOrEditToDoDialog({ToDoItem? existingTodo, bool isSubtask = false, ToDoItem? parentTodo}) {
     final bool isEditing = existingTodo != null;
-    final String dialogTitle = isEditing ? 'Edit To-Do' : 'Add a new To-Do';
-    final String saveButtonText = isEditing ? 'SAVE' : 'ADD';
+    final String dialogTitle = isEditing
+        ? (isSubtask ? 'Edit Subtask' : 'Edit Task')
+        : (isSubtask ? 'Add Subtask' : 'New Task');
+    final String saveButtonText = isEditing ? 'Save changes' : 'Add task';
 
     _textFieldController.text = existingTodo?.title ?? '';
     DateTime? selectedDueDate = existingTodo?.dueDate;
@@ -410,120 +413,168 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
     DateTime? recurrenceEndDate = existingTodo?.recurrenceEndDate;
     List<Label> selectedLabels = List.from(existingTodo?.labels ?? []);
 
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (context) {
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            return AlertDialog(
-              title: Text(dialogTitle),
-              content: SingleChildScrollView(
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+            final primary = Theme.of(context).colorScheme.primary;
+            final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+
+            return Padding(
+              padding: EdgeInsets.only(bottom: bottomInset),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    TextField(
-                      controller: _textFieldController,
-                      decoration: const InputDecoration(hintText: "Enter task here"),
-                      autofocus: true,
-                    ),
-                    const SizedBox(height: 20),
+                    // ── Cabeçalho ────────────────────────────────────────
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Flexible(
-                          child: Text(
-                            selectedDueDate == null
-                                ? 'No due date'
-                                : DateFormat('MMM d, hh:mm a').format(selectedDueDate!),
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: primary.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            isEditing ? Icons.edit_rounded : Icons.add_task_rounded,
+                            color: primary,
+                            size: 20,
                           ),
                         ),
-                        TextButton(
-                          child: const Text('SET DATE'),
-                          onPressed: () async {
-                            final DateTime? pickedDate = await showDatePicker(
-                              context: context,
-                              initialDate: selectedDueDate ?? DateTime.now(),
-                              firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                              lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
-                            );
-                            if (pickedDate == null) return;
-                            final TimeOfDay? pickedTime = await showTimePicker(
-                              context: context,
-                              initialTime: TimeOfDay.fromDateTime(selectedDueDate ?? DateTime.now()),
-                            );
-                            if (pickedTime == null) return;
-                            setDialogState(() {
-                              selectedDueDate = DateTime(
-                                pickedDate.year,
-                                pickedDate.month,
-                                pickedDate.day,
-                                pickedTime.hour,
-                                pickedTime.minute,
-                              );
-                            });
+                        const SizedBox(width: 12),
+                        Text(
+                          dialogTitle,
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                            color: isDark ? const Color(0xFFEDE9FF) : const Color(0xFF1A1A2E),
+                          ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: Icon(Icons.close_rounded,
+                              color: isDark ? const Color(0xFF6B6080) : const Color(0xFFAA99CC)),
+                          onPressed: () {
+                            _textFieldController.clear();
+                            Navigator.of(context).pop();
                           },
-                        )
+                        ),
                       ],
                     ),
-                    
-                    // Show only on due date option (only if there's a due date)
-                    if (selectedDueDate != null)
-                      Row(
+                    const SizedBox(height: 20),
+
+                    // ── Campo de texto ────────────────────────────────────
+                    TextField(
+                      controller: _textFieldController,
+                      autofocus: true,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                      decoration: InputDecoration(
+                        hintText: isSubtask ? 'Subtask description…' : 'What needs to be done?',
+                        prefixIcon: Icon(Icons.task_alt_rounded, color: primary.withOpacity(0.6)),
+                      ),
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) {},
+                    ),
+                    const SizedBox(height: 16),
+
+                    // ── Due date ──────────────────────────────────────────
+                    _buildSheetSection(
+                      icon: Icons.calendar_today_rounded,
+                      label: selectedDueDate == null
+                          ? 'No due date'
+                          : DateFormat('MMM d, yyyy · hh:mm a').format(selectedDueDate!),
+                      isDark: isDark,
+                      primary: primary,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Checkbox(
-                            value: showOnlyOnDueDate,
-                            onChanged: (value) {
+                          if (selectedDueDate != null)
+                            TextButton(
+                              onPressed: () => setDialogState(() => selectedDueDate = null),
+                              child: const Text('Clear'),
+                            ),
+                          TextButton(
+                            onPressed: () async {
+                              final DateTime? pickedDate = await showDatePicker(
+                                context: context,
+                                initialDate: selectedDueDate ?? DateTime.now(),
+                                firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                                lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
+                              );
+                              if (pickedDate == null) return;
+                              final TimeOfDay? pickedTime = await showTimePicker(
+                                context: context,
+                                initialTime: TimeOfDay.fromDateTime(selectedDueDate ?? DateTime.now()),
+                              );
+                              if (pickedTime == null) return;
                               setDialogState(() {
-                                showOnlyOnDueDate = value ?? false;
+                                selectedDueDate = DateTime(
+                                  pickedDate.year, pickedDate.month, pickedDate.day,
+                                  pickedTime.hour, pickedTime.minute,
+                                );
                               });
                             },
-                          ),
-                          const Expanded(
-                            child: Text('Show only on due date'),
+                            child: const Text('Set date'),
                           ),
                         ],
                       ),
-                    
-                    // Recurring task options (only for main tasks, not subtasks)
+                    ),
+
+                    // ── Show only on due date ─────────────────────────────
+                    if (selectedDueDate != null) ...[
+                      const SizedBox(height: 8),
+                      _buildToggleRow(
+                        icon: Icons.visibility_rounded,
+                        label: 'Show only on due date',
+                        value: showOnlyOnDueDate,
+                        onChanged: (v) => setDialogState(() => showOnlyOnDueDate = v ?? false),
+                        isDark: isDark,
+                        primary: primary,
+                      ),
+                    ],
+
+                    // ── Recurring ─────────────────────────────────────────
                     if (!isSubtask) ...[
-                      const SizedBox(height: 20),
-                      const Divider(),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Checkbox(
-                            value: isRecurring,
-                            onChanged: (value) {
-                              setDialogState(() {
-                                isRecurring = value ?? false;
-                                if (!isRecurring) {
-                                  recurrenceInterval = RecurrenceInterval.none;
-                                  recurrenceEndDate = null;
-                                } else {
-                                  // Set default interval when enabling recurring
-                                  if (recurrenceInterval == RecurrenceInterval.none) {
-                                    recurrenceInterval = RecurrenceInterval.weekly;
-                                  }
-                                  // Auto-set due date to now if not already set
-                                  if (selectedDueDate == null) {
-                                    selectedDueDate = DateTime.now();
-                                  }
-                                }
-                              });
-                            },
-                          ),
-                          const Text('Make this a recurring task'),
-                        ],
+                      const SizedBox(height: 8),
+                      _buildToggleRow(
+                        icon: Icons.repeat_rounded,
+                        label: 'Recurring task',
+                        value: isRecurring,
+                        onChanged: (v) {
+                          setDialogState(() {
+                            isRecurring = v ?? false;
+                            if (!isRecurring) {
+                              recurrenceInterval = RecurrenceInterval.none;
+                              recurrenceEndDate = null;
+                            } else {
+                              if (recurrenceInterval == RecurrenceInterval.none) {
+                                recurrenceInterval = RecurrenceInterval.weekly;
+                              }
+                              if (selectedDueDate == null) {
+                                selectedDueDate = DateTime.now();
+                              }
+                            }
+                          });
+                        },
+                        isDark: isDark,
+                        primary: primary,
                       ),
-                      
+
                       if (isRecurring) ...[
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 12),
                         DropdownButtonFormField<RecurrenceInterval>(
-                          value: recurrenceInterval == RecurrenceInterval.none ? RecurrenceInterval.weekly : recurrenceInterval,
+                          value: recurrenceInterval == RecurrenceInterval.none
+                              ? RecurrenceInterval.weekly
+                              : recurrenceInterval,
                           decoration: const InputDecoration(
                             labelText: 'Repeat every',
-                            border: OutlineInputBorder(),
                           ),
                           items: [
                             RecurrenceInterval.daily,
@@ -542,7 +593,7 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                             });
                           },
                         ),
-                        
+
                         const SizedBox(height: 10),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -590,6 +641,27 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                     const SizedBox(height: 20),
                     const Divider(),
                     const SizedBox(height: 10),
+                    // ── Labels ───────────────────────────────────────────
+                    const SizedBox(height: 16),
+                    Divider(
+                      color: isDark ? const Color(0xFF2D2844) : const Color(0xFFEEE8FF),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(Icons.label_rounded, size: 16, color: primary.withOpacity(0.7)),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Labels',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: primary.withOpacity(0.7),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
                     LabelPickerWidget(
                       selectedLabels: selectedLabels,
                       onLabelsChanged: (labels) {
@@ -598,129 +670,190 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
                         });
                       },
                     ),
+
+                    const SizedBox(height: 28),
+
+                    // ── Botão guardar ─────────────────────────────────────
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          final newTitle = _textFieldController.text;
+                          if (newTitle.isNotEmpty) {
+                            HapticFeedback.mediumImpact();
+                            try {
+                              if (isEditing) {
+                                existingTodo.title = newTitle;
+                                existingTodo.dueDate = selectedDueDate;
+                                existingTodo.showOnlyOnDueDate = showOnlyOnDueDate;
+                                existingTodo.isRecurring = isRecurring;
+                                existingTodo.recurrenceInterval = isRecurring ? recurrenceInterval : RecurrenceInterval.none;
+                                existingTodo.recurrenceEndDate = recurrenceEndDate;
+                                existingTodo.labels = selectedLabels;
+                                if (isRecurring && existingTodo.dueDate != null) {
+                                  existingTodo.nextOccurrenceDate = existingTodo.calculateNextOccurrence();
+                                } else {
+                                  existingTodo.nextOccurrenceDate = null;
+                                }
+                                final updatedTodo = await _syncService.saveTodoSafely(existingTodo);
+                                await _updateTaskLabels(updatedTodo.id!, selectedLabels);
+                                if (updatedTodo.id != null && updatedTodo.dueDate != null) {
+                                  await _notificationService.scheduleTaskDueNotification(
+                                    taskId: updatedTodo.id!,
+                                    taskTitle: updatedTodo.title,
+                                    dueDate: updatedTodo.dueDate!,
+                                  );
+                                }
+                                setState(() {
+                                  final index = _todos.indexWhere((t) => t.id == updatedTodo.id);
+                                  if (index != -1) {
+                                    _todos[index] = updatedTodo;
+                                    _todos[index].labels = selectedLabels;
+                                  }
+                                });
+                              } else {
+                                final newTodo = ToDoItem(
+                                  title: newTitle,
+                                  dueDate: selectedDueDate,
+                                  showOnlyOnDueDate: showOnlyOnDueDate,
+                                  isRecurring: isRecurring,
+                                  recurrenceInterval: isRecurring ? recurrenceInterval : RecurrenceInterval.none,
+                                  recurrenceEndDate: recurrenceEndDate,
+                                );
+                                print('UI: Creating new task: $newTitle');
+                                if (isRecurring && newTodo.dueDate != null) {
+                                  newTodo.nextOccurrenceDate = newTodo.calculateNextOccurrence();
+                                }
+                                if (isSubtask && parentTodo != null) {
+                                  newTodo.parentId = parentTodo.id;
+                                  final savedSubtask = await _syncService.saveTodoSafely(newTodo);
+                                  setState(() {
+                                    parentTodo.addSubtask(savedSubtask);
+                                  });
+                                } else {
+                                  final savedTodo = await _syncService.saveTodoSafely(newTodo);
+                                  await _updateTaskLabels(savedTodo.id!, selectedLabels);
+                                  savedTodo.labels = selectedLabels;
+                                  if (savedTodo.id != null && savedTodo.dueDate != null) {
+                                    await _notificationService.scheduleTaskDueNotification(
+                                      taskId: savedTodo.id!,
+                                      taskTitle: savedTodo.title,
+                                      dueDate: savedTodo.dueDate!,
+                                    );
+                                  }
+                                }
+                              }
+                            } catch (e) {
+                              print('Error saving todo: $e');
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error saving task: $e')),
+                                );
+                              }
+                            }
+                          }
+                          _textFieldController.clear();
+                          Navigator.of(context).pop();
+                        },
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(isEditing ? Icons.check_rounded : Icons.add_rounded, size: 20),
+                            const SizedBox(width: 8),
+                            Text(saveButtonText),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
-              actions: <Widget>[
-                TextButton(
-                  child: const Text('CANCEL'),
-                  onPressed: () {
-                    _textFieldController.clear();
-                    Navigator.of(context).pop();
-                  },
-                ),
-                TextButton(
-                  child: Text(saveButtonText),
-                  onPressed: () async {
-                    final newTitle = _textFieldController.text;
-                    if (newTitle.isNotEmpty) {
-                      try {
-                        if (isEditing) {
-                          // Update existing todo
-                          existingTodo.title = newTitle;
-                          existingTodo.dueDate = selectedDueDate;
-                          existingTodo.showOnlyOnDueDate = showOnlyOnDueDate;
-                          existingTodo.isRecurring = isRecurring;
-                          existingTodo.recurrenceInterval = isRecurring ? recurrenceInterval : RecurrenceInterval.none;
-                          existingTodo.recurrenceEndDate = recurrenceEndDate;
-                          existingTodo.labels = selectedLabels;
-                          // Set next_occurrence_date if recurring
-                          if (isRecurring && existingTodo.dueDate != null) {
-                            existingTodo.nextOccurrenceDate = existingTodo.calculateNextOccurrence();
-                          } else {
-                            existingTodo.nextOccurrenceDate = null;
-                          }
-                          
-                          final updatedTodo = await _syncService.saveTodoSafely(existingTodo);
-                          
-                          // Update task labels in database
-                          await _updateTaskLabels(updatedTodo.id!, selectedLabels);
-
-                          // Schedule notification if due date is set
-                          if (updatedTodo.id != null && updatedTodo.dueDate != null) {
-                            await _notificationService.scheduleTaskDueNotification(
-                              taskId: updatedTodo.id!,
-                              taskTitle: updatedTodo.title,
-                              dueDate: updatedTodo.dueDate!,
-                            );
-                          }
-                          
-                          setState(() {
-                            final index = _todos.indexWhere((t) => t.id == updatedTodo.id);
-                            if (index != -1) {
-                              _todos[index] = updatedTodo;
-                              _todos[index].labels = selectedLabels;
-                            }
-                          });
-                        } else {
-                          // Create new todo
-                          final newTodo = ToDoItem(
-                            title: newTitle,
-                            dueDate: selectedDueDate,
-                            showOnlyOnDueDate: showOnlyOnDueDate,
-                            isRecurring: isRecurring,
-                            recurrenceInterval: isRecurring ? recurrenceInterval : RecurrenceInterval.none,
-                            recurrenceEndDate: recurrenceEndDate,
-                          );
-                          
-                          // Debug: Always print the task creation details
-                          print('UI: Creating new task:');
-                          print('  title: $newTitle');
-                          print('  isRecurring: $isRecurring');
-                          print('  recurrenceInterval: ${isRecurring ? recurrenceInterval.value : 'none'}');
-                          print('  selectedDueDate: $selectedDueDate');
-                          print('  newTodo.dueDate: ${newTodo.dueDate}');
-                          
-                          // Set next_occurrence_date if recurring
-                          if (isRecurring) {
-                            if (newTodo.dueDate != null) {
-                              newTodo.nextOccurrenceDate = newTodo.calculateNextOccurrence();
-                              print('  calculated nextOccurrenceDate: ${newTodo.nextOccurrenceDate}');
-                            } else {
-                              print('  WARNING: Cannot calculate next occurrence - no due date set!');
-                            }
-                          }
-                          if (isSubtask && parentTodo != null) {
-                            newTodo.parentId = parentTodo.id;
-                            final savedSubtask = await _syncService.saveTodoSafely(newTodo);
-                            setState(() {
-                              parentTodo.addSubtask(savedSubtask);
-                            });
-                          } else {
-                            final savedTodo = await _syncService.saveTodoSafely(newTodo);
-                            // Update task labels in database
-                            await _updateTaskLabels(savedTodo.id!, selectedLabels);
-                            savedTodo.labels = selectedLabels;  // Set the labels on the todo item
-
-                            // Schedule notification if due date is set
-                            if (savedTodo.id != null && savedTodo.dueDate != null) {
-                              await _notificationService.scheduleTaskDueNotification(
-                                taskId: savedTodo.id!,
-                                taskTitle: savedTodo.title,
-                                dueDate: savedTodo.dueDate!,
-                              );
-                            }
-
-                            // O serviço de sincronização já atualizou _todos via callback
-                            // Não precisamos adicionar manualmente
-                          }
-                        }
-                      } catch (e) {
-                        print('Error saving todo: $e');
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Error saving task: $e')),
-                        );
-                      }
-                    }
-                    _textFieldController.clear();
-                    Navigator.of(context).pop();
-                  },
-                ),
-              ],
             );
           },
         );
       },
+    );
+  }
+
+  // ── Helpers para o bottom sheet ────────────────────────────────────────────
+
+  Widget _buildSheetSection({
+    required IconData icon,
+    required String label,
+    required bool isDark,
+    required Color primary,
+    Widget? trailing,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1F1C30) : const Color(0xFFF3F0FF),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? const Color(0xFF2D2844) : const Color(0xFFE0D7FF),
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: primary.withOpacity(0.7)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? const Color(0xFFAA99CC) : const Color(0xFF6B5B95),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          if (trailing != null) trailing,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleRow({
+    required IconData icon,
+    required String label,
+    required bool value,
+    required ValueChanged<bool?> onChanged,
+    required bool isDark,
+    required Color primary,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      decoration: BoxDecoration(
+        color: value
+            ? primary.withOpacity(0.08)
+            : (isDark ? const Color(0xFF1F1C30) : const Color(0xFFF3F0FF)),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: value ? primary.withOpacity(0.3) : (isDark ? const Color(0xFF2D2844) : const Color(0xFFE0D7FF)),
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: value ? primary : primary.withOpacity(0.5)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                color: value
+                    ? (isDark ? const Color(0xFFEDE9FF) : const Color(0xFF1A1A2E))
+                    : (isDark ? const Color(0xFFAA99CC) : const Color(0xFF6B5B95)),
+                fontWeight: value ? FontWeight.w600 : FontWeight.w500,
+              ),
+            ),
+          ),
+          Checkbox(value: value, onChanged: onChanged),
+        ],
+      ),
     );
   }
 
@@ -1118,350 +1251,459 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final primary = Theme.of(context).colorScheme.primary;
+    final taskCount = _filteredTodos.length;
 
     return Scaffold(
-      drawer: _buildLabelsDrawer(), // Added the drawer here
-      // Mostra indicador de sincronização na parte superior
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDarkMode
-                ? [
-                    const Color(0xFF0F172A),
-                    const Color(0xFF1E293B),
-                    const Color(0xFF0F172A),
-                  ]
-                : [
-                    const Color(0xFFF5F7FA),
-                    const Color(0xFFE8EAF6),
-                    const Color(0xFFF5F7FA),
-                  ],
-          ),
-        ),
-        child: Column(
+      drawer: _buildLabelsDrawer(),
+
+      // ── AppBar ────────────────────────────────────────────────────────────
+      appBar: AppBar(
+        backgroundColor: isDarkMode ? const Color(0xFF0D0B17) : const Color(0xFFF5F3FF),
+        leading: Builder(builder: (ctx) {
+          return IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: primary.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(Icons.menu_rounded, color: primary, size: 20),
+            ),
+            onPressed: () => Scaffold.of(ctx).openDrawer(),
+          );
+        }),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Barra de status de sincronização
-            if (_isSyncing)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: isDarkMode
-                        ? [
-                            Colors.blue.withOpacity(0.2),
-                            Colors.purple.withOpacity(0.2),
-                          ]
-                        : [
-                            Colors.blue.withOpacity(0.1),
-                            Colors.purple.withOpacity(0.1),
-                          ],
+            Row(
+              children: [
+                Text(
+                  'My Tasks',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 22,
+                    letterSpacing: -0.5,
+                    color: isDarkMode ? const Color(0xFFEDE9FF) : const Color(0xFF1A1A2E),
                   ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          Theme.of(context).primaryColor,
-                        ),
-                      ),
+                if (_isSyncing) ...[
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(primary),
                     ),
-                    const SizedBox(width: 12),
-                    const Text(
-                      'Sincronizando base de dados...',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                  ),
+                ],
+                if (!_isSyncing && _syncService.timeSinceLastSync != null) ...[
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: 'Synced ${_syncService.timeSinceLastSync!.inMinutes}m ago',
+                    child: Icon(
+                      _syncService.needsSync ? Icons.sync_problem_rounded : Icons.cloud_done_rounded,
+                      size: 16,
+                      color: _syncService.needsSync
+                          ? Colors.orange
+                          : (isDarkMode ? const Color(0xFF4ADE80) : Colors.green),
                     ),
-                  ],
+                  ),
+                ],
+              ],
+            ),
+            if (!_isLoading)
+              Text(
+                '$taskCount task${taskCount == 1 ? '' : 's'}${_filterByLabel != null ? ' · ${_filterByLabel!.name}' : ''}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDarkMode ? const Color(0xFF6B6080) : const Color(0xFFAA99CC),
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-            // Conteúdo principal
-            Expanded(
-              child: _isLoading
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircularProgressIndicator(
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              Theme.of(context).primaryColor,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Loading your tasks...',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: () async {
-                        await _syncService.forceSync();
-                      },
-                      color: Theme.of(context).primaryColor,
-                      child: _filteredTodos.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.task_alt,
-                                    size: 80,
-                                    color: Theme.of(context).primaryColor.withOpacity(0.3),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'No tasks yet!',
-                                    style: TextStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.bold,
-                                      color: Theme.of(context).textTheme.bodyLarge?.color,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Tap the + button to add your first task',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              itemCount: _filteredTodos.length,
-                              itemBuilder: (context, index) {
-                                final todo = _filteredTodos[index];
-                                return ToDoListItemWidget(
-                                  todo: todo,
-                                  onStatusChanged: () => _toggleToDoStatus(todo),
-                                  onDismissed: () => _deleteToDoItem(todo),
-                                  onEdit: () => _showAddOrEditToDoDialog(existingTodo: todo),
-                                  onAddSubtask: _addSubtask,
-                                  onSubtaskStatusChanged: _toggleSubtaskStatus,
-                                  onSubtaskDeleted: _deleteSubtask,
-                                  onSubtaskEdit: _editSubtask,
-                                );
-                              },
-                            ),
-                    ),
-            ),
           ],
         ),
+        actions: [
+          // Botão tema
+          IconButton(
+            icon: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 300),
+              transitionBuilder: (child, anim) =>
+                  RotationTransition(turns: anim, child: FadeTransition(opacity: anim, child: child)),
+              child: Icon(
+                isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                key: ValueKey(isDarkMode),
+                color: isDarkMode ? const Color(0xFFEDE9FF) : const Color(0xFF1A1A2E),
+              ),
+            ),
+            onPressed: () {
+              HapticFeedback.selectionClick();
+              widget.onThemeModeChanged(isDarkMode ? ThemeMode.light : ThemeMode.dark);
+            },
+          ),
+          // Botão refresh
+          IconButton(
+            icon: AnimatedRotation(
+              turns: _isSyncing ? 1 : 0,
+              duration: const Duration(milliseconds: 600),
+              child: Icon(
+                Icons.refresh_rounded,
+                color: isDarkMode ? const Color(0xFFEDE9FF) : const Color(0xFF1A1A2E),
+              ),
+            ),
+            tooltip: 'Sync now',
+            onPressed: _isSyncing ? null : () {
+              HapticFeedback.lightImpact();
+              _syncService.forceSync();
+            },
+          ),
+          // Popup menu com filtros e opções extra
+          PopupMenuButton<String>(
+            icon: Icon(
+              Icons.tune_rounded,
+              color: isDarkMode ? const Color(0xFFEDE9FF) : const Color(0xFF1A1A2E),
+            ),
+            tooltip: 'Filters & options',
+            onSelected: (value) async {
+              switch (value) {
+                case 'show_completed':
+                  setState(() => _showCompleted = !_showCompleted);
+                  break;
+                case 'hide_future':
+                  setState(() => _hideFutureTasks = !_hideFutureTasks);
+                  break;
+                case 'show_due_date_only':
+                  setState(() => _showOnlyTasksWithShowOnDueDate = !_showOnlyTasksWithShowOnDueDate);
+                  break;
+                case 'hide_cremes':
+                  setState(() => _hideCremesTasks = !_hideCremesTasks);
+                  break;
+                case 'update':
+                  await AutoUpdateService().manualUpdateCheck();
+                  break;
+                case 'debug':
+                  _showDebugDialog();
+                  break;
+              }
+            },
+            itemBuilder: (ctx) => [
+              PopupMenuItem(
+                value: 'show_completed',
+                child: Row(children: [
+                  Icon(_showCompleted ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                      size: 18, color: primary),
+                  const SizedBox(width: 12),
+                  Text(_showCompleted ? 'Hide completed' : 'Show completed'),
+                ]),
+              ),
+              PopupMenuItem(
+                value: 'hide_future',
+                child: Row(children: [
+                  Icon(_hideFutureTasks ? Icons.event_available_rounded : Icons.event_busy_rounded,
+                      size: 18, color: primary),
+                  const SizedBox(width: 12),
+                  Text(_hideFutureTasks ? 'Show future tasks' : 'Hide 3+ day tasks'),
+                ]),
+              ),
+              PopupMenuItem(
+                value: 'show_due_date_only',
+                child: Row(children: [
+                  Icon(_showOnlyTasksWithShowOnDueDate ? Icons.calendar_view_day_rounded : Icons.calendar_today_rounded,
+                      size: 18, color: primary),
+                  const SizedBox(width: 12),
+                  Text(_showOnlyTasksWithShowOnDueDate ? 'Show all tasks' : 'Only due-date tasks'),
+                ]),
+              ),
+              PopupMenuItem(
+                value: 'hide_cremes',
+                child: Row(children: [
+                  Icon(_hideCremesTasks ? Icons.spa_rounded : Icons.spa_outlined,
+                      size: 18, color: primary),
+                  const SizedBox(width: 12),
+                  Text(_hideCremesTasks ? 'Show Cremes' : 'Hide Cremes'),
+                ]),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                value: 'update',
+                child: Row(children: [
+                  Icon(Icons.system_update_rounded, size: 18, color: Colors.blue),
+                  SizedBox(width: 12),
+                  Text('Check for updates'),
+                ]),
+              ),
+              const PopupMenuItem(
+                value: 'debug',
+                child: Row(children: [
+                  Icon(Icons.science_outlined, size: 18, color: Colors.orange),
+                  SizedBox(width: 12),
+                  Text('Debug / Notifications'),
+                ]),
+              ),
+            ],
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
-      // Show a bottom bar with action when filtered by Cremes
+
+      // ── Body ──────────────────────────────────────────────────────────────
+      body: Column(
+        children: [
+          // Faixa de sincronização animada
+          AnimatedSize(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            child: _isSyncing
+                ? Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: primary.withOpacity(isDarkMode ? 0.15 : 0.08),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: primary),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Syncing…',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+
+          // Conteúdo principal
+          Expanded(
+            child: _isLoading
+                ? _buildLoadingState(primary, isDarkMode)
+                : RefreshIndicator(
+                    onRefresh: () => _syncService.forceSync(),
+                    color: primary,
+                    child: _filteredTodos.isEmpty
+                        ? _buildEmptyState(primary, isDarkMode)
+                        : ListView.builder(
+                            padding: const EdgeInsets.only(top: 8, bottom: 100),
+                            itemCount: _filteredTodos.length,
+                            itemBuilder: (context, index) {
+                              final todo = _filteredTodos[index];
+                              return ToDoListItemWidget(
+                                todo: todo,
+                                onStatusChanged: () => _toggleToDoStatus(todo),
+                                onDismissed: () => _deleteToDoItem(todo),
+                                onEdit: () => _showAddOrEditToDoDialog(existingTodo: todo),
+                                onAddSubtask: _addSubtask,
+                                onSubtaskStatusChanged: _toggleSubtaskStatus,
+                                onSubtaskDeleted: _deleteSubtask,
+                                onSubtaskEdit: _editSubtask,
+                              );
+                            },
+                          ),
+                  ),
+          ),
+        ],
+      ),
+
+      // ── Bottom bar Cremes ─────────────────────────────────────────────────
       bottomNavigationBar: (_filterByLabel != null && _filterByLabel!.name.toLowerCase() == 'cremes')
           ? SafeArea(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: ElevatedButton.icon(
-                  icon: const Icon(Icons.check_box_outline_blank),
+                  icon: const Icon(Icons.check_box_outline_blank_rounded),
                   label: const Text('Uncheck all Cremes tasks'),
-                  style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                  style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
                   onPressed: () async {
                     final confirm = await showDialog<bool>(
                       context: context,
-                      builder: (ctx) {
-                        return AlertDialog(
-                          title: const Text('Confirm'),
-                          content: const Text('Uncheck all tasks with label "Cremes"?'),
-                          actions: [
-                            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('CANCEL')),
-                            TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('OK')),
-                          ],
-                        );
-                      },
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Confirm'),
+                        content: const Text('Uncheck all tasks with label "Cremes"?'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+                          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Confirm')),
+                        ],
+                      ),
                     );
-
-                    if (confirm == true) {
-                      await _uncheckAllTasksForLabel(_filterByLabel!);
-                    }
+                    if (confirm == true) await _uncheckAllTasksForLabel(_filterByLabel!);
                   },
                 ),
               ),
             )
           : null,
-      appBar: AppBar(
-        flexibleSpace: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDarkMode
-                  ? [
-                      const Color(0xFF1E293B),
-                      const Color(0xFF334155),
-                    ]
-                  : [
-                      const Color(0xFF6366F1),
-                      const Color(0xFF8B5CF6),
-                    ],
-            ),
-          ),
-        ),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
+
+      // ── FAB animado ───────────────────────────────────────────────────────
+      floatingActionButton: _AnimatedFab(
+        onPressed: () {
+          HapticFeedback.mediumImpact();
+          _showAddOrEditToDoDialog();
+        },
+        primary: primary,
+      ),
+    );
+  }
+
+  Widget _buildLoadingState(Color primary, bool isDarkMode) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0.8, end: 1.0),
+            duration: const Duration(milliseconds: 900),
+            curve: Curves.easeInOut,
+            builder: (_, val, child) => Transform.scale(scale: val, child: child),
+            child: Container(
+              width: 72,
+              height: 72,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
+                color: primary.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(22),
               ),
-              child: Icon(
-                Icons.check_circle_outline,
-                size: 20,
-                color: isDarkMode ? Colors.white : Colors.white,
-              ),
-            ),
-            const SizedBox(width: 12),
-            const Text(
-              'My Tasks',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-                color: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: CircularProgressIndicator(strokeWidth: 3, color: primary),
               ),
             ),
-            const SizedBox(width: 8),
-            if (_syncService.timeSinceLastSync != null)
-              Tooltip(
-                message: 'Última sincronização há ${_syncService.timeSinceLastSync!.inMinutes} minuto(s)',
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: _syncService.needsSync
-                        ? Colors.orange.withOpacity(0.3)
-                        : Colors.green.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Icon(
-                    Icons.sync,
-                    size: 14,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        iconTheme: const IconThemeData(color: Colors.white),
-        actionsIconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
-            onPressed: () {
-              final newThemeMode = isDarkMode ? ThemeMode.light : ThemeMode.dark;
-              widget.onThemeModeChanged(newThemeMode);
-            },
           ),
-          IconButton(
-            icon: Icon(_showCompleted ? Icons.visibility_off : Icons.visibility),
-            tooltip: _showCompleted ? 'Hide completed tasks' : 'Show completed tasks',
-            onPressed: () {
-              setState(() {
-                _showCompleted = !_showCompleted;
-              });
-            },
-          ),
-          IconButton(
-            icon: Icon(_hideFutureTasks ? Icons.event_available : Icons.event_busy),
-            tooltip: _hideFutureTasks ? 'Show future tasks' : 'Hide tasks due in 3+ days',
-            onPressed: () {
-              setState(() {
-                _hideFutureTasks = !_hideFutureTasks;
-              });
-            },
-         ),
-         IconButton(
-           icon: Icon(
-             _showOnlyTasksWithShowOnDueDate ? Icons.visibility : Icons.visibility_off,
-             color: _showOnlyTasksWithShowOnDueDate ? Colors.blue : null,
-           ),
-           tooltip: _showOnlyTasksWithShowOnDueDate 
-               ? 'Show all tasks' 
-               : 'Show only tasks with "Show on due date"',
-           onPressed: () {
-             setState(() {
-               _showOnlyTasksWithShowOnDueDate = !_showOnlyTasksWithShowOnDueDate;
-             });
-           },
-         ),
-         IconButton(
-           icon: Icon(_hideCremesTasks ? Icons.spa : Icons.spa_outlined),
-           tooltip: _hideCremesTasks ? 'Show Cremes tasks' : 'Hide Cremes tasks',
-           onPressed: () {
-             setState(() {
-               _hideCremesTasks = !_hideCremesTasks;
-             });
-           },
-         ),
-         IconButton(
-           icon: Icon(
-             Icons.refresh,
-             color: _isSyncing ? Colors.blue : null,
-           ),
-           tooltip: 'Sincronizar agora',
-           onPressed: _isSyncing ? null : () async {
-             await _syncService.forceSync();
-           },
-         ),
-         IconButton(
-           icon: const Icon(Icons.system_update),
-           tooltip: 'Check for updates',
-           onPressed: () async {
-             final autoUpdateService = AutoUpdateService();
-             await autoUpdateService.manualUpdateCheck();
-           },
-         ),
-          IconButton(
-            icon: const Icon(Icons.science_outlined),
-            tooltip: 'Debug Notifications',
-            onPressed: () => _showDebugDialog(),
+          const SizedBox(height: 20),
+          Text(
+            'Loading your tasks…',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: isDarkMode ? const Color(0xFF6B6080) : const Color(0xFFAA99CC),
+            ),
           ),
         ],
       ),
-      floatingActionButton: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDarkMode
-                ? [
-                    const Color(0xFF818CF8),
-                    const Color(0xFF8B5CF6),
-                  ]
-                : [
-                    const Color(0xFF6366F1),
-                    const Color(0xFF8B5CF6),
-                  ],
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Theme.of(context).primaryColor.withOpacity(0.4),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
+    );
+  }
+
+  Widget _buildEmptyState(Color primary, bool isDarkMode) {
+    return ListView(
+      children: [
+        SizedBox(
+          height: 500,
+          child: Center(
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0.0, end: 1.0),
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeOutBack,
+              builder: (_, val, child) =>
+                  Transform.scale(scale: val, child: Opacity(opacity: val.clamp(0, 1), child: child)),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                      color: primary.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(
+                        color: primary.withOpacity(0.15),
+                        width: 2,
+                      ),
+                    ),
+                    child: Icon(
+                      Icons.check_circle_outline_rounded,
+                      size: 48,
+                      color: primary.withOpacity(0.4),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    _filterByLabel != null ? 'No tasks in this label' : 'All clear!',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
+                      color: isDarkMode ? const Color(0xFFEDE9FF) : const Color(0xFF1A1A2E),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _filterByLabel != null
+                        ? 'No tasks found for "${_filterByLabel!.name}"'
+                        : 'Tap + to add your first task',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDarkMode ? const Color(0xFF6B6080) : const Color(0xFFAA99CC),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ],
+          ),
         ),
-        child: FloatingActionButton(
-          onPressed: () => _showAddOrEditToDoDialog(),
-          tooltip: 'Add To-Do',
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          child: const Icon(Icons.add, size: 28, color: Colors.white),
+      ],
+    );
+  }
+}
+
+// ── FAB com animação pulsante ──────────────────────────────────────────────────
+
+class _AnimatedFab extends StatefulWidget {
+  final VoidCallback onPressed;
+  final Color primary;
+
+  const _AnimatedFab({required this.onPressed, required this.primary});
+
+  @override
+  State<_AnimatedFab> createState() => _AnimatedFabState();
+}
+
+class _AnimatedFabState extends State<_AnimatedFab>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    )..repeat(reverse: true);
+    _pulse = Tween<double>(begin: 1.0, end: 1.08).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: _pulse,
+      child: FloatingActionButton.extended(
+        onPressed: widget.onPressed,
+        backgroundColor: widget.primary,
+        foregroundColor: Colors.white,
+        elevation: 6,
+        label: const Text(
+          'New Task',
+          style: TextStyle(fontWeight: FontWeight.w700, letterSpacing: 0.3),
         ),
+        icon: const Icon(Icons.add_rounded, size: 22),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       ),
     );
   }
