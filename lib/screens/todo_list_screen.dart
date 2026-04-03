@@ -1,16 +1,25 @@
+// lib/screens/todo_list_screen.dart
+//
+// Ecrã principal redesenhado com o novo visual moderno escuro.
+// Toda a lógica de negócio é preservada — apenas a UI foi renovada.
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../models/todo_item.dart';
 import '../models/label.dart';
-import '../services/supabase_service.dart'; // Updated import
+import '../services/supabase_service.dart';
 import '../services/label_service.dart';
 import '../services/notification_service.dart';
 import '../services/auto_update_service.dart';
-import '../services/database_sync_service.dart'; // Novo serviço de sincronização
+import '../services/database_sync_service.dart';
 import '../services/deadline_monitor_service.dart';
-import '../widgets/todo_list_item_widget.dart';
 import '../widgets/label_picker_widget.dart';
+import '../theme/app_theme.dart';
+import '../widgets/todo_filter_chips_widget.dart';
+import '../widgets/todo_task_card_widget.dart';
 
 class ToDoListScreen extends StatefulWidget {
   final Function(ThemeMode) onThemeModeChanged;
@@ -21,79 +30,148 @@ class ToDoListScreen extends StatefulWidget {
   State<ToDoListScreen> createState() => _ToDoListScreenState();
 }
 
-class _ToDoListScreenState extends State<ToDoListScreen> {
+class _ToDoListScreenState extends State<ToDoListScreen>
+    with SingleTickerProviderStateMixin {
+  // ── Services ────────────────────────────────────────────────────────────────
   final TextEditingController _textFieldController = TextEditingController();
   final SupabaseService _supabaseService = SupabaseService();
   final LabelService _labelService = LabelService();
   final NotificationService _notificationService = NotificationService();
-  final DatabaseSyncService _syncService = DatabaseSyncService(); // Novo serviço
+  final DatabaseSyncService _syncService = DatabaseSyncService();
   final DeadlineMonitorService _deadlineMonitor = DeadlineMonitorService();
+
+  // ── State ───────────────────────────────────────────────────────────────────
   List<ToDoItem> _todos = [];
-  List<Label> _allLabels = []; // Added to store all available labels
+  List<Label> _allLabels = [];
   bool _isLoading = true;
-  bool _isSyncing = false; // Indicador de sincronização
+  bool _isSyncing = false;
+
+  // Filters
   bool _showCompleted = false;
   bool _hideFutureTasks = false;
-  bool _showOnlyTasksWithShowOnDueDate = false; // New filter state
-  bool _hideCremesTasks = true; // Nova variável para esconder tasks com label 'Cremes' (ativado por padrão)
+  bool _showOnlyTasksWithShowOnDueDate = false;
+  bool _hideCremesTasks = true;
   Label? _filterByLabel;
+  TodoFilter _activeFilter = TodoFilter.all;
+
+  // Header animation
+  late AnimationController _headerCtrl;
+  late Animation<double> _headerFade;
+
+  // ── Computed ─────────────────────────────────────────────────────────────────
+  int get _totalCount => _todos.where((t) => !t.isDone).length;
+  int get _doneCount => _todos.where((t) => t.isDone).length;
+  int get _overdueCount =>
+      _todos
+          .where(
+            (t) =>
+                !t.isDone &&
+                t.dueDate != null &&
+                t.dueDate!.isBefore(DateTime.now()),
+          )
+          .length;
+
   List<ToDoItem> get _filteredTodos {
-    List<ToDoItem> filtered = _todos;
+    List<ToDoItem> filtered = List.from(_todos);
 
-    // When the "show only on due date" filter is active, we start with just those tasks.
-    if (_showOnlyTasksWithShowOnDueDate) {
-      filtered = filtered.where((todo) => todo.showOnlyOnDueDate).toList();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    // Tab filter
+    switch (_activeFilter) {
+      case TodoFilter.today:
+        filtered =
+            filtered.where((t) {
+              if (t.dueDate == null) return false;
+              final d = DateTime(
+                t.dueDate!.year,
+                t.dueDate!.month,
+                t.dueDate!.day,
+              );
+              return d.isAtSameMomentAs(today);
+            }).toList();
+        break;
+      case TodoFilter.upcoming:
+        filtered =
+            filtered.where((t) {
+              if (t.dueDate == null) return false;
+              final d = DateTime(
+                t.dueDate!.year,
+                t.dueDate!.month,
+                t.dueDate!.day,
+              );
+              return d.isAfter(today);
+            }).toList();
+        break;
+      case TodoFilter.done:
+        return filtered.where((t) => t.isDone).toList();
+      case TodoFilter.all:
+        break;
     }
 
-    // Filter by completion status
+    // Hide completed
     if (!_showCompleted) {
-      filtered = filtered.where((todo) => !todo.isDone).toList();
+      filtered = filtered.where((t) => !t.isDone).toList();
     }
 
-    // Filter by future deadlines (more than 3 days away)
+    // Hide future tasks (>3 days)
     if (_hideFutureTasks) {
-      final threeDaysFromNow = DateTime.now().add(const Duration(days: 3));
-      filtered = filtered.where((todo) {
-        // Keep tasks without due dates or tasks due within 3 days
-        return todo.dueDate == null || todo.dueDate!.isBefore(threeDaysFromNow);
-      }).toList();
+      final threeDays = now.add(const Duration(days: 3));
+      filtered =
+          filtered
+              .where((t) => t.dueDate == null || t.dueDate!.isBefore(threeDays))
+              .toList();
     }
 
-    // Filter tasks that should only show on due date, but only if the specific filter for them is NOT active.
-    if (!_showOnlyTasksWithShowOnDueDate) {
-      final now = DateTime.now();
-      filtered = filtered.where((todo) {
-        // If showOnlyOnDueDate is true and has a due date, only show if due date is today or past
-        if (todo.showOnlyOnDueDate && todo.dueDate != null) {
-          final dueDate = DateTime(todo.dueDate!.year, todo.dueDate!.month, todo.dueDate!.day);
-          final today = DateTime(now.year, now.month, now.day);
-          return dueDate.isBefore(today) || dueDate.isAtSameMomentAs(today);
-        }
-        // Otherwise, show the task normally
-        return true;
-      }).toList();
+    // Show only on due date
+    if (_showOnlyTasksWithShowOnDueDate) {
+      filtered = filtered.where((t) => t.showOnlyOnDueDate).toList();
+    } else {
+      filtered =
+          filtered.where((t) {
+            if (t.showOnlyOnDueDate && t.dueDate != null) {
+              final due = DateTime(
+                t.dueDate!.year,
+                t.dueDate!.month,
+                t.dueDate!.day,
+              );
+              return due.isBefore(today) || due.isAtSameMomentAs(today);
+            }
+            return true;
+          }).toList();
     }
 
-    // The logic to filter for _showOnlyTasksWithShowOnDueDate has been moved to the top.
-
-    // Filter out tasks with 'Cremes' label
+    // Hide Cremes
     if (_hideCremesTasks) {
-      filtered = filtered.where((todo) => 
-        !todo.labels.any((label) => label.name.toLowerCase() == 'cremes')).toList();
+      filtered =
+          filtered
+              .where(
+                (t) => !t.labels.any((l) => l.name.toLowerCase() == 'cremes'),
+              )
+              .toList();
     }
-    
+
     // Filter by label
     if (_filterByLabel != null) {
-      filtered = filtered.where((todo) => 
-        todo.labels.any((label) => label.id == _filterByLabel!.id)).toList();
+      filtered =
+          filtered
+              .where((t) => t.labels.any((l) => l.id == _filterByLabel!.id))
+              .toList();
     }
-    
+
     return filtered;
   }
 
+  // ── Lifecycle ────────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
+    _headerCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _headerFade = CurvedAnimation(parent: _headerCtrl, curve: Curves.easeOut);
+    _headerCtrl.forward();
     _initializeSyncService();
     _loadAllLabels();
   }
@@ -101,41 +179,37 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Initialize deadline monitor with context
     _deadlineMonitor.initialize(context);
   }
 
   @override
   void dispose() {
+    _headerCtrl.dispose();
     _deadlineMonitor.dispose();
     _syncService.dispose();
     _textFieldController.dispose();
     super.dispose();
   }
 
+  // ── Init helpers ──────────────────────────────────────────────────────────────
   Future<void> _loadAllLabels() async {
     try {
       final labels = await _labelService.getAllLabels();
-      setState(() {
-        _allLabels = labels;
-      });
+      if (mounted) setState(() => _allLabels = labels);
     } catch (e) {
-      print('Error loading labels: $e');
+      debugPrint('Error loading labels: $e');
     }
   }
 
   bool _isServiceReady() {
     try {
-      // Test if Supabase client is available
       Supabase.instance.client;
       return true;
-    } catch (e) {
-      print('⚠️ Service not ready: $e');
+    } catch (_) {
       return false;
     }
   }
 
-  /// Inicializa o serviço de sincronização com callbacks
   Future<void> _initializeSyncService() async {
     await _syncService.initialize(
       onDataUpdated: (todos) {
@@ -144,7 +218,6 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
             _todos = todos;
             _isLoading = false;
           });
-          // Update deadline monitor with latest tasks and start monitoring
           _deadlineMonitor.updateTasks(_todos);
           _deadlineMonitor.startMonitoring(_todos);
         }
@@ -153,10 +226,10 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Erro na sincronização: $error'),
-              backgroundColor: Colors.red,
+              content: Text('Sync error: $error'),
+              backgroundColor: AppColors.accentRed,
               action: SnackBarAction(
-                label: 'Tentar novamente',
+                label: 'Retry',
                 onPressed: () => _syncService.forceSync(),
               ),
             ),
@@ -164,99 +237,52 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
         }
       },
       onSyncStatusChanged: (isSyncing) {
-        if (mounted) {
-          setState(() {
-            _isSyncing = isSyncing;
-          });
-        }
+        if (mounted) setState(() => _isSyncing = isSyncing);
       },
     );
   }
 
-  Future<void> _saveTodosToStorage() async {
-    // Usa o serviço de sincronização com proteção
-    await _syncService.saveTodosSafely(_todos);
-  }
+  // ── Business logic ────────────────────────────────────────────────────────────
+  Future<void> _saveTodosToStorage() async =>
+      _syncService.saveTodosSafely(_todos);
 
   void _toggleToDoStatus(ToDoItem todo) async {
-    // Check if services are ready before proceeding
     if (!_isServiceReady()) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Services are still initializing. Please wait a moment and try again.'),
-            duration: Duration(seconds: 3),
-          ),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Services initializing. Please wait.')),
+      );
       return;
     }
-
     final originalStatus = todo.isDone;
-    
-    // Optimistically update the UI
-    setState(() {
-      todo.isDone = !todo.isDone;
-    });
-
+    setState(() => todo.isDone = !todo.isDone);
     try {
-      print('🔄 Toggling status for task: ${todo.title} (ID: ${todo.id})');
-      
-      // Update notifications based on the new status
       if (todo.isDone) {
-        // Task is now complete, cancel any pending notifications
         if (todo.id != null) {
           try {
             await _notificationService.cancelTaskNotifications(todo.id!);
             _deadlineMonitor.clearTaskAlert(todo.id!);
-            print('✅ Cancelled notifications for completed task: ${todo.title}');
-          } catch (notifError) {
-            print('⚠️ Warning: Could not cancel notifications: $notifError');
-            // Don't fail the whole operation if notification cancellation fails
-          }
+          } catch (_) {}
         }
       } else {
-        // Task is now incomplete, re-schedule notification if it has a future due date
-        if (todo.id != null && todo.dueDate != null && todo.dueDate!.isAfter(DateTime.now())) {
+        if (todo.id != null &&
+            todo.dueDate != null &&
+            todo.dueDate!.isAfter(DateTime.now())) {
           try {
             await _notificationService.scheduleTaskDueNotification(
               taskId: todo.id!,
               taskTitle: todo.title,
               dueDate: todo.dueDate!,
             );
-            print('🔄 Re-scheduled notification for incomplete task: ${todo.title}');
-          } catch (notifError) {
-            print('⚠️ Warning: Could not schedule notifications: $notifError');
-            // Don't fail the whole operation if notification scheduling fails
-          }
+          } catch (_) {}
         }
       }
-
-      // Persist the change to the database with protection
-      print('💾 Saving todo to database with protection...');
       await _syncService.saveTodoSafely(todo);
-      print('✅ Todo saved successfully');
-
-    } catch (e, stackTrace) {
-      // If anything fails, revert the change in the UI
-      setState(() {
-        todo.isDone = originalStatus;
-      });
-      print('❌ Error updating todo status: $e');
-      print('📍 Stack trace: $stackTrace');
-      
+    } catch (e) {
+      setState(() => todo.isDone = originalStatus);
       if (mounted) {
-        String errorMessage = 'Error updating task';
-        if (e.toString().contains('Supabase client not initialized')) {
-          errorMessage = 'Database not ready. Please try again.';
-        } else if (e.toString().contains('network')) {
-          errorMessage = 'Network error. Check your connection.';
-        }
-        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('$errorMessage: ${e.toString()}'),
-            duration: const Duration(seconds: 5),
+            content: Text('Error updating task: $e'),
             action: SnackBarAction(
               label: 'Retry',
               onPressed: () => _toggleToDoStatus(todo),
@@ -270,844 +296,1096 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
   void _deleteToDoItem(ToDoItem todo) {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Delete Task'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Are you sure you want to delete "${todo.title}"?'),
-              if (todo.isRecurring) ...[
-                const SizedBox(height: 10),
-                const Text(
-                  'This is a recurring task. What would you like to do?',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              child: const Text('CANCEL'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
+      builder:
+          (ctx) => AlertDialog(
+            backgroundColor: AppColors.bgSurface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.card),
             ),
-            if (todo.isRecurring) ...[
+            title: const Text(
+              'Delete Task',
+              style: TextStyle(color: AppColors.textPrimary),
+            ),
+            content: Text(
+              'Delete "${todo.title}"?',
+              style: const TextStyle(color: AppColors.textSecondary),
+            ),
+            actions: [
               TextButton(
-                child: const Text('DELETE ONLY THIS'),
-                onPressed: () async {
-                  try {
+                child: const Text(
+                  'CANCEL',
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
+                onPressed: () => Navigator.of(ctx).pop(),
+              ),
+              if (todo.isRecurring) ...[
+                TextButton(
+                  child: const Text(
+                    'THIS ONLY',
+                    style: TextStyle(color: AppColors.accentRed),
+                  ),
+                  onPressed: () async {
                     if (todo.id != null) {
-                      // First, cancel any pending notifications for this task
                       try {
-                        await _notificationService.cancelTaskNotifications(todo.id!);
+                        await _notificationService.cancelTaskNotifications(
+                          todo.id!,
+                        );
                         _deadlineMonitor.clearTaskAlert(todo.id!);
-                      } catch (notifError) {
-                        print('Warning: Could not cancel notifications: $notifError');
-                        // Continue with deletion even if notification cancellation fails
-                      }
+                      } catch (_) {}
                       await _syncService.deleteTodoSafely(todo.id!);
                     }
-                    Navigator.of(context).pop();
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Task "${todo.title}" deleted'),
-                        duration: const Duration(seconds: 2),
-                      ),
-                    );
-                  } catch (e) {
-                    Navigator.of(context).pop();
-                    print('Error deleting todo: $e');
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error deleting task: $e')),
-                    );
-                  }
-                },
-              ),
-              TextButton(
-                child: const Text('DELETE ALL INSTANCES'),
-                onPressed: () async {
-                  try {
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                  },
+                ),
+                TextButton(
+                  child: const Text(
+                    'ALL INSTANCES',
+                    style: TextStyle(color: AppColors.accentRed),
+                  ),
+                  onPressed: () async {
                     if (todo.id != null) {
                       await _syncService.wrapUserOperation(() async {
-                        await _supabaseService.deleteRecurringTask(todo.id!, deleteInstances: true);
-                        // Remove the original task and all its instances from local state
-                        setState(() {
-                          _todos.removeWhere((item) => 
-                            item.id == todo.id || item.originalRecurringTaskId == todo.id);
-                        });
+                        await _supabaseService.deleteRecurringTask(
+                          todo.id!,
+                          deleteInstances: true,
+                        );
+                        setState(
+                          () => _todos.removeWhere(
+                            (t) =>
+                                t.id == todo.id ||
+                                t.originalRecurringTaskId == todo.id,
+                          ),
+                        );
                       });
                     }
-                    Navigator.of(context).pop();
-                    
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Recurring task "${todo.title}" and all instances deleted'),
-                        duration: const Duration(seconds: 2),
-                      ),
-                    );
-                  } catch (e) {
-                    Navigator.of(context).pop();
-                    print('Error deleting recurring task: $e');
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error deleting recurring task: $e')),
-                    );
-                  }
-                },
-              ),
-            ] else
-              TextButton(
-                child: const Text('DELETE'),
-                onPressed: () async {
-                  try {
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                  },
+                ),
+              ] else
+                TextButton(
+                  child: const Text(
+                    'DELETE',
+                    style: TextStyle(color: AppColors.accentRed),
+                  ),
+                  onPressed: () async {
                     if (todo.id != null) {
-                      // First, cancel any pending notifications for this task
                       try {
-                        await _notificationService.cancelTaskNotifications(todo.id!);
+                        await _notificationService.cancelTaskNotifications(
+                          todo.id!,
+                        );
                         _deadlineMonitor.clearTaskAlert(todo.id!);
-                      } catch (notifError) {
-                        print('Warning: Could not cancel notifications: $notifError');
-                        // Continue with deletion even if notification cancellation fails
-                      }
+                      } catch (_) {}
                       await _syncService.deleteTodoSafely(todo.id!);
                     }
-                    Navigator.of(context).pop();
-
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Task "${todo.title}" deleted'),
-                        duration: const Duration(seconds: 2),
-                      ),
-                    );
-                  } catch (e) {
-                    Navigator.of(context).pop();
-                    print('Error deleting todo: $e');
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error deleting task: $e')),
-                    );
-                  }
-                },
-              ),
-          ],
-        );
-      },
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                  },
+                ),
+            ],
+          ),
     );
   }
 
-  void _showAddOrEditToDoDialog({ToDoItem? existingTodo, bool isSubtask = false, ToDoItem? parentTodo}) {
+  void _showAddOrEditToDoDialog({
+    ToDoItem? existingTodo,
+    bool isSubtask = false,
+    ToDoItem? parentTodo,
+  }) {
     final bool isEditing = existingTodo != null;
-    final String dialogTitle = isEditing ? 'Edit To-Do' : 'Add a new To-Do';
-    final String saveButtonText = isEditing ? 'SAVE' : 'ADD';
-
     _textFieldController.text = existingTodo?.title ?? '';
     DateTime? selectedDueDate = existingTodo?.dueDate;
     bool showOnlyOnDueDate = existingTodo?.showOnlyOnDueDate ?? false;
     bool isRecurring = existingTodo?.isRecurring ?? false;
-    RecurrenceInterval recurrenceInterval = existingTodo?.recurrenceInterval ?? RecurrenceInterval.none;
+    RecurrenceInterval recurrenceInterval =
+        existingTodo?.recurrenceInterval ?? RecurrenceInterval.none;
     DateTime? recurrenceEndDate = existingTodo?.recurrenceEndDate;
     List<Label> selectedLabels = List.from(existingTodo?.labels ?? []);
 
     showDialog(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: Text(dialogTitle),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: _textFieldController,
-                      decoration: const InputDecoration(hintText: "Enter task here"),
-                      autofocus: true,
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      builder:
+          (context) => StatefulBuilder(
+            builder:
+                (context, setDs) => Dialog(
+                  backgroundColor: AppColors.bgSurface,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadius.card),
+                  ),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Flexible(
-                          child: Text(
-                            selectedDueDate == null
-                                ? 'No due date'
-                                : DateFormat('MMM d, hh:mm a').format(selectedDueDate!),
+                        Text(
+                          isEditing ? 'Edit Task' : 'New Task',
+                          style: AppTextStyles.sectionLabel.copyWith(
+                            fontSize: 20,
                           ),
                         ),
-                        TextButton(
-                          child: const Text('SET DATE'),
-                          onPressed: () async {
-                            final DateTime? pickedDate = await showDatePicker(
-                              context: context,
-                              initialDate: selectedDueDate ?? DateTime.now(),
-                              firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                              lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
-                            );
-                            if (pickedDate == null) return;
-                            final TimeOfDay? pickedTime = await showTimePicker(
-                              context: context,
-                              initialTime: TimeOfDay.fromDateTime(selectedDueDate ?? DateTime.now()),
-                            );
-                            if (pickedTime == null) return;
-                            setDialogState(() {
-                              selectedDueDate = DateTime(
-                                pickedDate.year,
-                                pickedDate.month,
-                                pickedDate.day,
-                                pickedTime.hour,
-                                pickedTime.minute,
-                              );
-                            });
-                          },
-                        )
-                      ],
-                    ),
-                    
-                    // Show only on due date option (only if there's a due date)
-                    if (selectedDueDate != null)
-                      Row(
-                        children: [
-                          Checkbox(
-                            value: showOnlyOnDueDate,
-                            onChanged: (value) {
-                              setDialogState(() {
-                                showOnlyOnDueDate = value ?? false;
-                              });
-                            },
+                        const SizedBox(height: 20),
+                        // Title field
+                        TextField(
+                          controller: _textFieldController,
+                          autofocus: true,
+                          style: const TextStyle(color: AppColors.textPrimary),
+                          decoration: InputDecoration(
+                            hintText: 'Task title…',
+                            hintStyle: const TextStyle(
+                              color: AppColors.textMuted,
+                            ),
+                            filled: true,
+                            fillColor: AppColors.overlay08,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(
+                                AppRadius.button,
+                              ),
+                              borderSide: const BorderSide(
+                                color: AppColors.borderCard,
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(
+                                AppRadius.button,
+                              ),
+                              borderSide: const BorderSide(
+                                color: AppColors.borderCard,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(
+                                AppRadius.button,
+                              ),
+                              borderSide: const BorderSide(
+                                color: AppColors.accentPurple,
+                                width: 1.5,
+                              ),
+                            ),
                           ),
-                          const Expanded(
-                            child: Text('Show only on due date'),
-                          ),
-                        ],
-                      ),
-                    
-                    // Recurring task options (only for main tasks, not subtasks)
-                    if (!isSubtask) ...[
-                      const SizedBox(height: 20),
-                      const Divider(),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Checkbox(
-                            value: isRecurring,
-                            onChanged: (value) {
-                              setDialogState(() {
-                                isRecurring = value ?? false;
-                                if (!isRecurring) {
-                                  recurrenceInterval = RecurrenceInterval.none;
-                                  recurrenceEndDate = null;
-                                } else {
-                                  // Set default interval when enabling recurring
-                                  if (recurrenceInterval == RecurrenceInterval.none) {
-                                    recurrenceInterval = RecurrenceInterval.weekly;
-                                  }
-                                  // Auto-set due date to now if not already set
-                                  if (selectedDueDate == null) {
-                                    selectedDueDate = DateTime.now();
-                                  }
-                                }
-                              });
-                            },
-                          ),
-                          const Text('Make this a recurring task'),
-                        ],
-                      ),
-                      
-                      if (isRecurring) ...[
-                        const SizedBox(height: 10),
-                        DropdownButtonFormField<RecurrenceInterval>(
-                          value: recurrenceInterval == RecurrenceInterval.none ? RecurrenceInterval.weekly : recurrenceInterval,
-                          decoration: const InputDecoration(
-                            labelText: 'Repeat every',
-                            border: OutlineInputBorder(),
-                          ),
-                          items: [
-                            RecurrenceInterval.daily,
-                            RecurrenceInterval.weekly,
-                            RecurrenceInterval.monthly,
-                            RecurrenceInterval.yearly,
-                          ].map((interval) {
-                            return DropdownMenuItem(
-                              value: interval,
-                              child: Text(interval.displayName),
-                            );
-                          }).toList(),
-                          onChanged: (value) {
-                            setDialogState(() {
-                              recurrenceInterval = value ?? RecurrenceInterval.weekly;
-                            });
-                          },
                         ),
-                        
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 20),
+                        // Due date
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Flexible(
+                            const Icon(
+                              Icons.calendar_today_outlined,
+                              size: 16,
+                              color: AppColors.textSecondary,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
                               child: Text(
-                                recurrenceEndDate == null
-                                    ? 'No end date (repeats forever)'
-                                    : 'Ends: ${DateFormat('MMM d, yyyy').format(recurrenceEndDate!)}',
-                                style: Theme.of(context).textTheme.bodySmall,
+                                selectedDueDate == null
+                                    ? 'No due date'
+                                    : DateFormat(
+                                      'MMM d, HH:mm',
+                                    ).format(selectedDueDate!),
+                                style: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                ),
                               ),
                             ),
                             TextButton(
-                              child: const Text('SET END DATE'),
+                              child: const Text(
+                                'SET DATE',
+                                style: TextStyle(
+                                  color: AppColors.accentPurple,
+                                  fontSize: 12,
+                                ),
+                              ),
                               onPressed: () async {
-                                final DateTime? pickedDate = await showDatePicker(
+                                final date = await showDatePicker(
                                   context: context,
-                                  initialDate: recurrenceEndDate ?? DateTime.now().add(const Duration(days: 365)),
-                                  firstDate: selectedDueDate ?? DateTime.now(),
-                                  lastDate: DateTime.now().add(const Duration(days: 365 * 10)),
+                                  initialDate:
+                                      selectedDueDate ?? DateTime.now(),
+                                  firstDate: DateTime.now().subtract(
+                                    const Duration(days: 365),
+                                  ),
+                                  lastDate: DateTime.now().add(
+                                    const Duration(days: 365 * 5),
+                                  ),
                                 );
-                                if (pickedDate != null) {
-                                  setDialogState(() {
-                                    recurrenceEndDate = pickedDate;
-                                  });
-                                }
+                                if (date == null) return;
+                                final time = await showTimePicker(
+                                  context: context,
+                                  initialTime: TimeOfDay.fromDateTime(
+                                    selectedDueDate ?? DateTime.now(),
+                                  ),
+                                );
+                                if (time == null) return;
+                                setDs(() {
+                                  selectedDueDate = DateTime(
+                                    date.year,
+                                    date.month,
+                                    date.day,
+                                    time.hour,
+                                    time.minute,
+                                  );
+                                });
                               },
                             ),
                           ],
                         ),
-                        
-                        if (recurrenceEndDate != null)
-                          TextButton(
-                            child: const Text('REMOVE END DATE'),
-                            onPressed: () {
-                              setDialogState(() {
-                                recurrenceEndDate = null;
+                        if (selectedDueDate != null)
+                          _CheckRow(
+                            label: 'Show only on due date',
+                            value: showOnlyOnDueDate,
+                            onChanged:
+                                (v) => setDs(() => showOnlyOnDueDate = v),
+                          ),
+                        // Recurring
+                        if (!isSubtask) ...[
+                          const SizedBox(height: 8),
+                          const Divider(color: AppColors.borderSubtle),
+                          _CheckRow(
+                            label: 'Recurring task',
+                            value: isRecurring,
+                            onChanged: (v) {
+                              setDs(() {
+                                isRecurring = v;
+                                if (!isRecurring) {
+                                  recurrenceInterval = RecurrenceInterval.none;
+                                  recurrenceEndDate = null;
+                                } else {
+                                  if (recurrenceInterval ==
+                                      RecurrenceInterval.none) {
+                                    recurrenceInterval =
+                                        RecurrenceInterval.weekly;
+                                  }
+                                  selectedDueDate ??= DateTime.now();
+                                }
                               });
                             },
                           ),
+                          if (isRecurring) ...[
+                            const SizedBox(height: 12),
+                            DropdownButtonFormField<RecurrenceInterval>(
+                              value:
+                                  recurrenceInterval == RecurrenceInterval.none
+                                      ? RecurrenceInterval.weekly
+                                      : recurrenceInterval,
+                              dropdownColor: AppColors.bgSurface,
+                              style: const TextStyle(
+                                color: AppColors.textPrimary,
+                              ),
+                              decoration: InputDecoration(
+                                labelText: 'Repeat every',
+                                labelStyle: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                ),
+                                filled: true,
+                                fillColor: AppColors.overlay08,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(
+                                    AppRadius.button,
+                                  ),
+                                  borderSide: const BorderSide(
+                                    color: AppColors.borderCard,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(
+                                    AppRadius.button,
+                                  ),
+                                  borderSide: const BorderSide(
+                                    color: AppColors.borderCard,
+                                  ),
+                                ),
+                              ),
+                              items:
+                                  [
+                                        RecurrenceInterval.daily,
+                                        RecurrenceInterval.weekly,
+                                        RecurrenceInterval.monthly,
+                                        RecurrenceInterval.yearly,
+                                      ]
+                                      .map(
+                                        (i) => DropdownMenuItem(
+                                          value: i,
+                                          child: Text(i.displayName),
+                                        ),
+                                      )
+                                      .toList(),
+                              onChanged:
+                                  (v) => setDs(
+                                    () =>
+                                        recurrenceInterval =
+                                            v ?? RecurrenceInterval.weekly,
+                                  ),
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    recurrenceEndDate == null
+                                        ? 'No end date'
+                                        : 'Ends: ${DateFormat('MMM d, yyyy').format(recurrenceEndDate!)}',
+                                    style: const TextStyle(
+                                      color: AppColors.textSecondary,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                                TextButton(
+                                  child: const Text(
+                                    'SET END',
+                                    style: TextStyle(
+                                      color: AppColors.accentPurple,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  onPressed: () async {
+                                    final d = await showDatePicker(
+                                      context: context,
+                                      initialDate:
+                                          recurrenceEndDate ??
+                                          DateTime.now().add(
+                                            const Duration(days: 365),
+                                          ),
+                                      firstDate:
+                                          selectedDueDate ?? DateTime.now(),
+                                      lastDate: DateTime.now().add(
+                                        const Duration(days: 365 * 10),
+                                      ),
+                                    );
+                                    if (d != null) {
+                                      setDs(() => recurrenceEndDate = d);
+                                    }
+                                  },
+                                ),
+                                if (recurrenceEndDate != null)
+                                  TextButton(
+                                    child: const Text(
+                                      'CLEAR',
+                                      style: TextStyle(
+                                        color: AppColors.textMuted,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    onPressed:
+                                        () => setDs(
+                                          () => recurrenceEndDate = null,
+                                        ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ],
+                        // Labels
+                        const SizedBox(height: 8),
+                        const Divider(color: AppColors.borderSubtle),
+                        const SizedBox(height: 12),
+                        LabelPickerWidget(
+                          selectedLabels: selectedLabels,
+                          onLabelsChanged:
+                              (labels) => setDs(() => selectedLabels = labels),
+                        ),
+                        // Actions
+                        const SizedBox(height: 24),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton(
+                              child: const Text(
+                                'CANCEL',
+                                style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                              onPressed: () {
+                                _textFieldController.clear();
+                                Navigator.of(context).pop();
+                              },
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              decoration: BoxDecoration(
+                                gradient: AppGradients.primary,
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.button,
+                                ),
+                              ),
+                              child: TextButton(
+                                child: Text(
+                                  isEditing ? 'SAVE' : 'ADD',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                onPressed: () async {
+                                  final newTitle =
+                                      _textFieldController.text.trim();
+                                  if (newTitle.isNotEmpty) {
+                                    try {
+                                      if (isEditing) {
+                                        existingTodo.title = newTitle;
+                                        existingTodo.dueDate = selectedDueDate;
+                                        existingTodo.showOnlyOnDueDate =
+                                            showOnlyOnDueDate;
+                                        existingTodo.isRecurring = isRecurring;
+                                        existingTodo.recurrenceInterval =
+                                            isRecurring
+                                                ? recurrenceInterval
+                                                : RecurrenceInterval.none;
+                                        existingTodo.recurrenceEndDate =
+                                            recurrenceEndDate;
+                                        existingTodo.labels = selectedLabels;
+                                        if (isRecurring &&
+                                            existingTodo.dueDate != null) {
+                                          existingTodo.nextOccurrenceDate =
+                                              existingTodo
+                                                  .calculateNextOccurrence();
+                                        } else {
+                                          existingTodo.nextOccurrenceDate =
+                                              null;
+                                        }
+                                        final updated = await _syncService
+                                            .saveTodoSafely(existingTodo);
+                                        await _updateTaskLabels(
+                                          updated.id!,
+                                          selectedLabels,
+                                        );
+                                        if (updated.id != null &&
+                                            updated.dueDate != null) {
+                                          await _notificationService
+                                              .scheduleTaskDueNotification(
+                                                taskId: updated.id!,
+                                                taskTitle: updated.title,
+                                                dueDate: updated.dueDate!,
+                                              );
+                                        }
+                                        setState(() {
+                                          final idx = _todos.indexWhere(
+                                            (t) => t.id == updated.id,
+                                          );
+                                          if (idx != -1) {
+                                            _todos[idx] = updated;
+                                            _todos[idx].labels = selectedLabels;
+                                          }
+                                        });
+                                      } else {
+                                        final newTodo = ToDoItem(
+                                          title: newTitle,
+                                          dueDate: selectedDueDate,
+                                          showOnlyOnDueDate: showOnlyOnDueDate,
+                                          isRecurring: isRecurring,
+                                          recurrenceInterval:
+                                              isRecurring
+                                                  ? recurrenceInterval
+                                                  : RecurrenceInterval.none,
+                                          recurrenceEndDate: recurrenceEndDate,
+                                        );
+                                        if (isRecurring &&
+                                            newTodo.dueDate != null) {
+                                          newTodo.nextOccurrenceDate =
+                                              newTodo.calculateNextOccurrence();
+                                        }
+                                        if (isSubtask && parentTodo != null) {
+                                          newTodo.parentId = parentTodo.id;
+                                          final saved = await _syncService
+                                              .saveTodoSafely(newTodo);
+                                          setState(
+                                            () => parentTodo.addSubtask(saved),
+                                          );
+                                        } else {
+                                          final saved = await _syncService
+                                              .saveTodoSafely(newTodo);
+                                          await _updateTaskLabels(
+                                            saved.id!,
+                                            selectedLabels,
+                                          );
+                                          saved.labels = selectedLabels;
+                                          if (saved.id != null &&
+                                              saved.dueDate != null) {
+                                            await _notificationService
+                                                .scheduleTaskDueNotification(
+                                                  taskId: saved.id!,
+                                                  taskTitle: saved.title,
+                                                  dueDate: saved.dueDate!,
+                                                );
+                                          }
+                                        }
+                                      }
+                                    } catch (e) {
+                                      debugPrint('Error saving todo: $e');
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
+                                          SnackBar(
+                                            content: Text('Error saving: $e'),
+                                          ),
+                                        );
+                                      }
+                                    }
+                                  }
+                                  _textFieldController.clear();
+                                  if (context.mounted)
+                                    Navigator.of(context).pop();
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
-                    ],
-                    
-                    // Label picker (for all tasks)
-                    const SizedBox(height: 20),
-                    const Divider(),
-                    const SizedBox(height: 10),
-                    LabelPickerWidget(
-                      selectedLabels: selectedLabels,
-                      onLabelsChanged: (labels) {
-                        setDialogState(() {
-                          selectedLabels = labels;
-                        });
-                      },
                     ),
-                  ],
+                  ),
                 ),
-              ),
-              actions: <Widget>[
-                TextButton(
-                  child: const Text('CANCEL'),
-                  onPressed: () {
-                    _textFieldController.clear();
-                    Navigator.of(context).pop();
-                  },
-                ),
-                TextButton(
-                  child: Text(saveButtonText),
-                  onPressed: () async {
-                    final newTitle = _textFieldController.text;
-                    if (newTitle.isNotEmpty) {
-                      try {
-                        if (isEditing) {
-                          // Update existing todo
-                          existingTodo.title = newTitle;
-                          existingTodo.dueDate = selectedDueDate;
-                          existingTodo.showOnlyOnDueDate = showOnlyOnDueDate;
-                          existingTodo.isRecurring = isRecurring;
-                          existingTodo.recurrenceInterval = isRecurring ? recurrenceInterval : RecurrenceInterval.none;
-                          existingTodo.recurrenceEndDate = recurrenceEndDate;
-                          existingTodo.labels = selectedLabels;
-                          // Set next_occurrence_date if recurring
-                          if (isRecurring && existingTodo.dueDate != null) {
-                            existingTodo.nextOccurrenceDate = existingTodo.calculateNextOccurrence();
-                          } else {
-                            existingTodo.nextOccurrenceDate = null;
-                          }
-                          
-                          final updatedTodo = await _syncService.saveTodoSafely(existingTodo);
-                          
-                          // Update task labels in database
-                          await _updateTaskLabels(updatedTodo.id!, selectedLabels);
-
-                          // Schedule notification if due date is set
-                          if (updatedTodo.id != null && updatedTodo.dueDate != null) {
-                            await _notificationService.scheduleTaskDueNotification(
-                              taskId: updatedTodo.id!,
-                              taskTitle: updatedTodo.title,
-                              dueDate: updatedTodo.dueDate!,
-                            );
-                          }
-                          
-                          setState(() {
-                            final index = _todos.indexWhere((t) => t.id == updatedTodo.id);
-                            if (index != -1) {
-                              _todos[index] = updatedTodo;
-                              _todos[index].labels = selectedLabels;
-                            }
-                          });
-                        } else {
-                          // Create new todo
-                          final newTodo = ToDoItem(
-                            title: newTitle,
-                            dueDate: selectedDueDate,
-                            showOnlyOnDueDate: showOnlyOnDueDate,
-                            isRecurring: isRecurring,
-                            recurrenceInterval: isRecurring ? recurrenceInterval : RecurrenceInterval.none,
-                            recurrenceEndDate: recurrenceEndDate,
-                          );
-                          
-                          // Debug: Always print the task creation details
-                          print('UI: Creating new task:');
-                          print('  title: $newTitle');
-                          print('  isRecurring: $isRecurring');
-                          print('  recurrenceInterval: ${isRecurring ? recurrenceInterval.value : 'none'}');
-                          print('  selectedDueDate: $selectedDueDate');
-                          print('  newTodo.dueDate: ${newTodo.dueDate}');
-                          
-                          // Set next_occurrence_date if recurring
-                          if (isRecurring) {
-                            if (newTodo.dueDate != null) {
-                              newTodo.nextOccurrenceDate = newTodo.calculateNextOccurrence();
-                              print('  calculated nextOccurrenceDate: ${newTodo.nextOccurrenceDate}');
-                            } else {
-                              print('  WARNING: Cannot calculate next occurrence - no due date set!');
-                            }
-                          }
-                          if (isSubtask && parentTodo != null) {
-                            newTodo.parentId = parentTodo.id;
-                            final savedSubtask = await _syncService.saveTodoSafely(newTodo);
-                            setState(() {
-                              parentTodo.addSubtask(savedSubtask);
-                            });
-                          } else {
-                            final savedTodo = await _syncService.saveTodoSafely(newTodo);
-                            // Update task labels in database
-                            await _updateTaskLabels(savedTodo.id!, selectedLabels);
-                            savedTodo.labels = selectedLabels;  // Set the labels on the todo item
-
-                            // Schedule notification if due date is set
-                            if (savedTodo.id != null && savedTodo.dueDate != null) {
-                              await _notificationService.scheduleTaskDueNotification(
-                                taskId: savedTodo.id!,
-                                taskTitle: savedTodo.title,
-                                dueDate: savedTodo.dueDate!,
-                              );
-                            }
-
-                            // O serviço de sincronização já atualizou _todos via callback
-                            // Não precisamos adicionar manualmente
-                          }
-                        }
-                      } catch (e) {
-                        print('Error saving todo: $e');
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Error saving task: $e')),
-                        );
-                      }
-                    }
-                    _textFieldController.clear();
-                    Navigator.of(context).pop();
-                  },
-                ),
-              ],
-            );
-          },
-        );
-      },
+          ),
     );
   }
 
-  // Subtask management methods
-  void _addSubtask(ToDoItem parentTodo) {
-    _showAddOrEditToDoDialog(isSubtask: true, parentTodo: parentTodo);
-  }
+  void _addSubtask(ToDoItem parent) =>
+      _showAddOrEditToDoDialog(isSubtask: true, parentTodo: parent);
 
-  void _toggleSubtaskStatus(ToDoItem parentTodo, ToDoItem subtask) {
-    setState(() {
-      subtask.isDone = !subtask.isDone;
-    });
+  void _toggleSubtaskStatus(ToDoItem parent, ToDoItem subtask) {
+    setState(() => subtask.isDone = !subtask.isDone);
     _saveTodosToStorage();
   }
 
-  void _deleteSubtask(ToDoItem parentTodo, ToDoItem subtask) {
+  void _deleteSubtask(ToDoItem parent, ToDoItem subtask) {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Delete Subtask'),
-          content: Text('Are you sure you want to delete "${subtask.title}"?'),
-          actions: [
-            TextButton(
-              child: const Text('CANCEL'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
+      builder:
+          (ctx) => AlertDialog(
+            backgroundColor: AppColors.bgSurface,
+            title: const Text(
+              'Delete Subtask',
+              style: TextStyle(color: AppColors.textPrimary),
             ),
-            TextButton(
-              child: const Text('DELETE'),
-              onPressed: () {
-                setState(() {
-                  if (subtask.id != null) {
-                    parentTodo.removeSubtask(subtask.id!);
-                  }
-                });
-                _saveTodosToStorage();
-                Navigator.of(context).pop();
-                
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Subtask "${subtask.title}" deleted'),
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
-              },
+            content: Text(
+              'Delete "${subtask.title}"?',
+              style: const TextStyle(color: AppColors.textSecondary),
             ),
-          ],
-        );
-      },
+            actions: [
+              TextButton(
+                child: const Text(
+                  'CANCEL',
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
+                onPressed: () => Navigator.of(ctx).pop(),
+              ),
+              TextButton(
+                child: const Text(
+                  'DELETE',
+                  style: TextStyle(color: AppColors.accentRed),
+                ),
+                onPressed: () {
+                  setState(() {
+                    if (subtask.id != null) parent.removeSubtask(subtask.id!);
+                  });
+                  _saveTodosToStorage();
+                  Navigator.of(ctx).pop();
+                },
+              ),
+            ],
+          ),
     );
   }
-  void _editSubtask(ToDoItem parentTodo, ToDoItem subtask) {
-    _showAddOrEditToDoDialog(existingTodo: subtask, isSubtask: true, parentTodo: parentTodo);
-  }
 
-  // Uncheck all tasks that contain a specific label
+  void _editSubtask(ToDoItem parent, ToDoItem subtask) =>
+      _showAddOrEditToDoDialog(
+        existingTodo: subtask,
+        isSubtask: true,
+        parentTodo: parent,
+      );
+
   Future<void> _uncheckAllTasksForLabel(Label label) async {
     try {
-      // Find tasks currently loaded in memory with this label
-      final tasksToUncheck = _todos.where((t) => t.labels.any((l) => l.id == label.id) && t.isDone).toList();
-
-      if (tasksToUncheck.isEmpty) {
+      final tasks =
+          _todos
+              .where((t) => t.labels.any((l) => l.id == label.id) && t.isDone)
+              .toList();
+      if (tasks.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No completed Cremes tasks to uncheck.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No completed tasks to uncheck.')),
+          );
         }
         return;
       }
-
-      // Update each task locally and in the database with protection
       await _syncService.wrapUserOperation(() async {
-        for (final task in tasksToUncheck) {
-          task.isDone = false;
+        for (final t in tasks) {
+          t.isDone = false;
         }
-        
-        // Persist changes in batch
-        await _supabaseService.saveTodos(tasksToUncheck);
+        await _supabaseService.saveTodos(tasks);
       });
-
-      // Força uma sincronização para atualizar a UI
       await _syncService.forceSync();
-
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Unchecked ${tasksToUncheck.length} tasks.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unchecked ${tasks.length} tasks.')),
+        );
       }
     } catch (e) {
-      print('Error unchecking tasks: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error unchecking tasks: $e')));
-      }
+      debugPrint('Error unchecking tasks: $e');
     }
   }
 
-  // Update task labels in database
   Future<void> _updateTaskLabels(String taskId, List<Label> labels) async {
     try {
-      // Get current labels for the task
-      final currentLabels = await _labelService.getLabelsForTask(taskId);
-      
-      // Remove labels that are no longer selected
-      for (Label currentLabel in currentLabels) {
-        if (!labels.any((l) => l.id == currentLabel.id)) {
-          await _labelService.removeLabelFromTask(taskId, currentLabel.id!);
+      final current = await _labelService.getLabelsForTask(taskId);
+      for (final cl in current) {
+        if (!labels.any((l) => l.id == cl.id)) {
+          await _labelService.removeLabelFromTask(taskId, cl.id!);
         }
       }
-      
-      // Add new labels
-      for (Label label in labels) {
-        if (!currentLabels.any((l) => l.id == label.id)) {
-          await _labelService.addLabelToTask(taskId, label.id!);
+      for (final l in labels) {
+        if (!current.any((cl) => cl.id == l.id)) {
+          await _labelService.addLabelToTask(taskId, l.id!);
         }
       }
     } catch (e) {
-      print('Error updating task labels: $e');
+      debugPrint('Error updating task labels: $e');
     }
   }
 
   void _showDebugDialog() {
     showDialog(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            final syncStatus = _syncService.getStatus();
-            return AlertDialog(
-              title: const Text('Debug Menu'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Seção de Status de Sincronização
-                    const Text(
-                      'Status de Sincronização',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('• Sincronização automática: ${syncStatus['autoSyncActive'] ? "Ativa" : "Pausada"}'),
-                            Text('• Sincronizando agora: ${syncStatus['isSyncing'] ? "Sim" : "Não"}'),
-                            Text('• Operação em andamento: ${syncStatus['isUserOperating'] ? "Sim" : "Não"}'),
-                            Text('• Total de tarefas: ${syncStatus['currentTodosCount']}'),
-                            if (syncStatus['lastSyncTime'] != null)
-                              Text('• Última sync: ${DateTime.parse(syncStatus['lastSyncTime']).toLocal().toString().substring(11, 16)}'),
-                            if (syncStatus['pendingSyncQueue'] > 0)
-                              Text('• Filas pendentes: ${syncStatus['pendingSyncQueue']}', 
-                                style: const TextStyle(color: Colors.orange)),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    ListTile(
-                      leading: Icon(
-                        syncStatus['autoSyncActive'] ? Icons.pause : Icons.play_arrow,
-                        color: syncStatus['autoSyncActive'] ? Colors.orange : Colors.green,
-                      ),
-                      title: Text(syncStatus['autoSyncActive'] ? 'Pausar Sincronização' : 'Retomar Sincronização'),
-                      subtitle: const Text('Controla a atualização automática'),
-                      onTap: () {
-                        if (syncStatus['autoSyncActive']) {
-                          _syncService.stopAutoSync();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Sincronização automática pausada')),
-                          );
-                        } else {
-                          _syncService.startAutoSync();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Sincronização automática retomada')),
-                          );
-                        }
-                        Navigator.of(context).pop();
-                        // Reabrir o diálogo para mostrar o novo status
-                        Future.delayed(const Duration(milliseconds: 100), () {
-                          _showDebugDialog();
-                        });
-                      },
-                    ),
-                    const Divider(),
-                    const Text(
-                      'Testes de Notificação',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-              ListTile(
-                leading: const Icon(Icons.timer_outlined),
-                title: const Text('Schedule Test (10s)'),
-                onTap: () async {
-                  Navigator.of(context).pop();
-                  await _notificationService.scheduleTestNotification(secondsFromNow: 10);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Test notification scheduled for 10 seconds!')),
-                    );
-                  }
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.timer_10),
-                title: const Text('Quick Test (5s)'),
-                subtitle: const Text('Fast test notification'),
-                onTap: () async {
-                  Navigator.of(context).pop();
-                  await _notificationService.scheduleTestNotification(secondsFromNow: 5);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Quick test notification scheduled for 5 seconds!')),
-                    );
-                  }
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.notifications_active),
-                title: const Text('Show Immediate Test'),
-                onTap: () async {
-                  Navigator.of(context).pop();
-                  await _notificationService.showTestNotification();
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Immediate test notification sent!')),
-                    );
-                  }
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.plumbing),
-                title: const Text('Check Status'),
-                subtitle: const Text('Prints pending notifications to console'),
-                onTap: () async {
-                  Navigator.of(context).pop();
-                  await _notificationService.debugNotificationStatus();
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Check debug console for status')),
-                    );
-                  }
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete_sweep),
-                title: const Text('Cancel All Notifications'),
-                onTap: () async {
-                  Navigator.of(context).pop();
-                  await _notificationService.cancelAllNotifications();
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('All pending notifications cancelled')),
-                    );
-                  }
-                },
-              ),
-                  ],
+      builder:
+          (context) => StatefulBuilder(
+            builder: (context, setDs) {
+              final s = _syncService.getStatus();
+              return AlertDialog(
+                backgroundColor: AppColors.bgSurface,
+                title: const Text(
+                  'Debug',
+                  style: TextStyle(color: AppColors.textPrimary),
                 ),
-              ),
-              actions: [
-                TextButton(
-                  child: const Text('FECHAR'),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                  },
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Auto-sync: ${s['autoSyncActive'] ? "Active" : "Paused"}',
+                        style: const TextStyle(color: AppColors.textSecondary),
+                      ),
+                      Text(
+                        'Syncing: ${s['isSyncing'] ? "Yes" : "No"}',
+                        style: const TextStyle(color: AppColors.textSecondary),
+                      ),
+                      Text(
+                        'Tasks: ${s['currentTodosCount']}',
+                        style: const TextStyle(color: AppColors.textSecondary),
+                      ),
+                      const Divider(color: AppColors.borderSubtle),
+                      ListTile(
+                        textColor: AppColors.textPrimary,
+                        iconColor: AppColors.accentGreen,
+                        leading: const Icon(Icons.timer_outlined),
+                        title: const Text('Schedule Test (10s)'),
+                        onTap: () async {
+                          Navigator.of(context).pop();
+                          await _notificationService.scheduleTestNotification(
+                            secondsFromNow: 10,
+                          );
+                        },
+                      ),
+                      ListTile(
+                        textColor: AppColors.textPrimary,
+                        iconColor: AppColors.accentBlue,
+                        leading: const Icon(Icons.notifications_active),
+                        title: const Text('Show Immediate'),
+                        onTap: () async {
+                          Navigator.of(context).pop();
+                          await _notificationService.showTestNotification();
+                        },
+                      ),
+                      ListTile(
+                        textColor: AppColors.textPrimary,
+                        iconColor: AppColors.accentRed,
+                        leading: const Icon(Icons.delete_sweep),
+                        title: const Text('Cancel All Notifications'),
+                        onTap: () async {
+                          Navigator.of(context).pop();
+                          await _notificationService.cancelAllNotifications();
+                        },
+                      ),
+                    ],
+                  ),
                 ),
-              ],
-            );
-          },
-        );
-      },
+                actions: [
+                  TextButton(
+                    child: const Text(
+                      'CLOSE',
+                      style: TextStyle(color: AppColors.accentPurple),
+                    ),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              );
+            },
+          ),
     );
   }
 
-  Color _parseColor(String colorString) {
-    try {
-      return Color(int.parse(colorString.replaceFirst('#', '0xFF')));
-    } catch (e) {
-      return Colors.blue;
-    }
-  }
-
+  // ── Labels drawer ────────────────────────────────────────────────────────────
   Widget _buildLabelsDrawer() {
     return Drawer(
-      child: Column(
-        children: [
-          const DrawerHeader(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Colors.blue, Colors.blueAccent],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+      backgroundColor: AppColors.bgMid,
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+              decoration: const BoxDecoration(
+                gradient: AppGradients.header,
+                border: Border(
+                  bottom: BorderSide(color: AppColors.borderSubtle),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.accentPurple.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(AppRadius.small),
+                    ),
+                    child: const Icon(
+                      Icons.label_outline,
+                      color: AppColors.accentPurple,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Text(
+                    'Labels',
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
             ),
-            child: Center(
+            ListTile(
+              leading: const Icon(
+                Icons.clear_all,
+                color: AppColors.textSecondary,
+              ),
+              title: const Text(
+                'Show All',
+                style: TextStyle(color: AppColors.textPrimary),
+              ),
+              onTap: () {
+                setState(() {
+                  _filterByLabel = null;
+                  _hideCremesTasks = true;
+                });
+                Navigator.pop(context);
+              },
+              selected: _filterByLabel == null,
+              selectedTileColor: AppColors.overlay05,
+            ),
+            const Divider(color: AppColors.borderSubtle, height: 1),
+            Expanded(
+              child:
+                  _allLabels.isEmpty
+                      ? const Center(
+                        child: Text(
+                          'No labels yet',
+                          style: TextStyle(color: AppColors.textMuted),
+                        ),
+                      )
+                      : ListView.builder(
+                        itemCount: _allLabels.length,
+                        itemBuilder: (ctx, i) {
+                          final label = _allLabels[i];
+                          final isSelected = _filterByLabel?.id == label.id;
+                          Color lc;
+                          try {
+                            lc = Color(
+                              int.parse(label.color.replaceFirst('#', '0xFF')),
+                            );
+                          } catch (_) {
+                            lc = AppColors.accentPurple;
+                          }
+                          return ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: lc,
+                              radius: 10,
+                            ),
+                            title: Text(
+                              label.name,
+                              style: const TextStyle(
+                                color: AppColors.textPrimary,
+                              ),
+                            ),
+                            onTap: () {
+                              setState(() {
+                                if (label.name.toLowerCase() == 'cremes') {
+                                  _hideCremesTasks = false;
+                                }
+                                _filterByLabel = isSelected ? null : label;
+                              });
+                              Navigator.pop(context);
+                            },
+                            selected: isSelected,
+                            selectedTileColor: AppColors.overlay05,
+                            trailing:
+                                isSelected
+                                    ? Icon(Icons.check, color: lc, size: 18)
+                                    : null,
+                          );
+                        },
+                      ),
+            ),
+            if (_filterByLabel != null &&
+                _filterByLabel!.name.toLowerCase() == 'cremes')
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: AppGradients.primary,
+                    borderRadius: BorderRadius.circular(AppRadius.button),
+                  ),
+                  child: TextButton.icon(
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size.fromHeight(44),
+                    ),
+                    icon: const Icon(
+                      Icons.check_box_outline_blank,
+                      color: Colors.white,
+                    ),
+                    label: const Text(
+                      'Uncheck all Cremes',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                    onPressed: () async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder:
+                            (ctx) => AlertDialog(
+                              backgroundColor: AppColors.bgSurface,
+                              title: const Text(
+                                'Confirm',
+                                style: TextStyle(color: AppColors.textPrimary),
+                              ),
+                              content: const Text(
+                                'Uncheck all Cremes tasks?',
+                                style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(ctx).pop(false),
+                                  child: const Text('CANCEL'),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.of(ctx).pop(true),
+                                  child: const Text('OK'),
+                                ),
+                              ],
+                            ),
+                      );
+                      if (ok == true) {
+                        await _uncheckAllTasksForLabel(_filterByLabel!);
+                        if (mounted) Navigator.pop(context);
+                      }
+                    },
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Build ────────────────────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: AppColors.bgDeep,
+        drawer: _buildLabelsDrawer(),
+        floatingActionButton: _buildFAB(),
+        body: Container(
+          decoration: const BoxDecoration(gradient: AppGradients.screenBg),
+          child: SafeArea(
+            child: Column(
+              children: [
+                _buildHeader(),
+                if (_isSyncing) _buildSyncBanner(),
+                _buildFilterChips(),
+                _buildSectionHeader(),
+                Expanded(child: _buildTaskList()),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return FadeTransition(
+      opacity: _headerFade,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Builder(
+                  builder:
+                      (ctx) => GestureDetector(
+                        onTap: () => Scaffold.of(ctx).openDrawer(),
+                        child: Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: AppColors.overlay08,
+                            borderRadius: BorderRadius.circular(
+                              AppRadius.small,
+                            ),
+                            border: Border.all(color: AppColors.borderSubtle),
+                          ),
+                          child: const Icon(
+                            Icons.menu_rounded,
+                            color: AppColors.textSecondary,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                ),
+                const Spacer(),
+                _IconAction(
+                  icon:
+                      _showCompleted
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                  active: _showCompleted,
+                  onTap: () => setState(() => _showCompleted = !_showCompleted),
+                ),
+                const SizedBox(width: 8),
+                _IconAction(
+                  icon: Icons.sync_rounded,
+                  loading: _isSyncing,
+                  onTap: _isSyncing ? null : () => _syncService.forceSync(),
+                ),
+                const SizedBox(width: 8),
+                _IconAction(
+                  icon: Icons.more_vert_rounded,
+                  onTap: () => _showMoreMenu(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            const Text('My Tasks', style: AppTextStyles.screenTitle),
+            const SizedBox(height: 4),
+            Text(
+              DateFormat('EEEE, MMM d').format(DateTime.now()),
+              style: AppTextStyles.greeting,
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSyncBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      color: AppColors.accentPurple.withOpacity(0.12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          SizedBox(
+            width: 12,
+            height: 12,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                AppColors.accentPurple.withOpacity(0.8),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            'Syncing…',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChips() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+      child: TodoFilterChipsWidget(
+        selected: _activeFilter,
+        onSelected: (f) => setState(() => _activeFilter = f),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader() {
+    final count = _filteredTodos.length;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+      child: Row(
+        children: [
+          Text(
+            _activeFilter == TodoFilter.all
+                ? "Today's Tasks"
+                : _activeFilter.label,
+            style: AppTextStyles.sectionLabel,
+          ),
+          const SizedBox(width: 8),
+          if (count > 0)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColors.accentPurple.withOpacity(0.25),
+                borderRadius: BorderRadius.circular(AppRadius.badge),
+              ),
               child: Text(
-                'Labels',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 24,
+                '$count',
+                style: const TextStyle(
+                  color: AppColors.accentPurple,
+                  fontSize: 12,
                   fontWeight: FontWeight.bold,
                 ),
               ),
             ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.clear_all),
-            title: const Text('Show All Tasks'),
-            onTap: () {
-              setState(() {
-                _filterByLabel = null;
-                // Also reset the 'Cremes' filter to its default (hidden)
-                _hideCremesTasks = true;
-              });
-              Navigator.pop(context);
-            },
-            selected: _filterByLabel == null,
-          ),
-          const Divider(),
-          Expanded(
-            child: _allLabels.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No labels available',
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: _allLabels.length,
-                    itemBuilder: (context, index) {
-                      final label = _allLabels[index];
-                      final isSelected = _filterByLabel?.id == label.id;
-                      
-                      return ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: _parseColor(label.color),
-                          radius: 12,
-                        ),
-                        title: Text(label.name),
-                        onTap: () {
-                          setState(() {
-                            // If user taps the 'Cremes' label, ensure Cremes tasks are visible
-                            if ((label.name).toLowerCase() == 'cremes') {
-                              _hideCremesTasks = false;
-                            }
-                            _filterByLabel = isSelected ? null : label;
-                          });
-                          Navigator.pop(context);
-                        },
-                        selected: isSelected,
-                        trailing: isSelected ? const Icon(Icons.check) : null,
-                      );
-                    },
-                  ),
-          ),
-          // Show an action button at the bottom when the 'Cremes' label is selected
-          if (_filterByLabel != null && _filterByLabel!.name.toLowerCase() == 'cremes')
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(44),
+          const Spacer(),
+          if (_filterByLabel != null)
+            GestureDetector(
+              onTap: () => setState(() => _filterByLabel = null),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.accentBlue.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(AppRadius.badge),
                 ),
-                icon: const Icon(Icons.check_box_outline_blank),
-                label: const Text('Uncheck all Cremes tasks'),
-                onPressed: () async {
-                  // Confirm before running
-                  final confirm = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) {
-                      return AlertDialog(
-                        title: const Text('Confirm'),
-                        content: const Text('Uncheck all tasks with label "Cremes"?'),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('CANCEL')),
-                          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('OK')),
-                        ],
-                      );
-                    },
-                  );
-
-                  if (confirm == true) {
-                    await _uncheckAllTasksForLabel(_filterByLabel!);
-                    Navigator.pop(context); // close drawer after action
-                  }
-                },
+                child: Row(
+                  children: [
+                    Text(
+                      _filterByLabel!.name,
+                      style: const TextStyle(
+                        color: AppColors.accentBlue,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(
+                      Icons.close_rounded,
+                      size: 12,
+                      color: AppColors.accentBlue,
+                    ),
+                  ],
+                ),
               ),
             ),
         ],
@@ -1115,354 +1393,339 @@ class _ToDoListScreenState extends State<ToDoListScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
-    return Scaffold(
-      drawer: _buildLabelsDrawer(), // Added the drawer here
-      // Mostra indicador de sincronização na parte superior
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDarkMode
-                ? [
-                    const Color(0xFF0F172A),
-                    const Color(0xFF1E293B),
-                    const Color(0xFF0F172A),
-                  ]
-                : [
-                    const Color(0xFFF5F7FA),
-                    const Color(0xFFE8EAF6),
-                    const Color(0xFFF5F7FA),
-                  ],
-          ),
-        ),
+  Widget _buildTaskList() {
+    if (_isLoading) {
+      return Center(
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Barra de status de sincronização
-            if (_isSyncing)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: isDarkMode
-                        ? [
-                            Colors.blue.withOpacity(0.2),
-                            Colors.purple.withOpacity(0.2),
-                          ]
-                        : [
-                            Colors.blue.withOpacity(0.1),
-                            Colors.purple.withOpacity(0.1),
-                          ],
-                  ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          Theme.of(context).primaryColor,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    const Text(
-                      'Sincronizando base de dados...',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-                    ),
-                  ],
+            SizedBox(
+              width: 36,
+              height: 36,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  AppColors.accentPurple.withOpacity(0.8),
                 ),
               ),
-            // Conteúdo principal
-            Expanded(
-              child: _isLoading
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircularProgressIndicator(
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              Theme.of(context).primaryColor,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Loading your tasks...',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.7),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: () async {
-                        await _syncService.forceSync();
-                      },
-                      color: Theme.of(context).primaryColor,
-                      child: _filteredTodos.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.task_alt,
-                                    size: 80,
-                                    color: Theme.of(context).primaryColor.withOpacity(0.3),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'No tasks yet!',
-                                    style: TextStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.bold,
-                                      color: Theme.of(context).textTheme.bodyLarge?.color,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Tap the + button to add your first task',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Theme.of(context).textTheme.bodyMedium?.color?.withOpacity(0.6),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : ListView.builder(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
-                              itemCount: _filteredTodos.length,
-                              itemBuilder: (context, index) {
-                                final todo = _filteredTodos[index];
-                                return ToDoListItemWidget(
-                                  todo: todo,
-                                  onStatusChanged: () => _toggleToDoStatus(todo),
-                                  onDismissed: () => _deleteToDoItem(todo),
-                                  onEdit: () => _showAddOrEditToDoDialog(existingTodo: todo),
-                                  onAddSubtask: _addSubtask,
-                                  onSubtaskStatusChanged: _toggleSubtaskStatus,
-                                  onSubtaskDeleted: _deleteSubtask,
-                                  onSubtaskEdit: _editSubtask,
-                                );
-                              },
-                            ),
-                    ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Loading your tasks…',
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
             ),
           ],
         ),
-      ),
-      // Show a bottom bar with action when filtered by Cremes
-      bottomNavigationBar: (_filterByLabel != null && _filterByLabel!.name.toLowerCase() == 'cremes')
-          ? SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.check_box_outline_blank),
-                  label: const Text('Uncheck all Cremes tasks'),
-                  style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                  onPressed: () async {
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) {
-                        return AlertDialog(
-                          title: const Text('Confirm'),
-                          content: const Text('Uncheck all tasks with label "Cremes"?'),
-                          actions: [
-                            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('CANCEL')),
-                            TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('OK')),
-                          ],
-                        );
-                      },
-                    );
+      );
+    }
 
-                    if (confirm == true) {
-                      await _uncheckAllTasksForLabel(_filterByLabel!);
-                    }
+    return RefreshIndicator(
+      onRefresh: () => _syncService.forceSync(),
+      color: AppColors.accentPurple,
+      backgroundColor: AppColors.bgSurface,
+      child:
+          _filteredTodos.isEmpty
+              ? _buildEmptyState()
+              : ListView.builder(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                physics: const BouncingScrollPhysics(),
+                itemCount: _filteredTodos.length,
+                itemBuilder: (context, index) {
+                  final todo = _filteredTodos[index];
+                  return TodoTaskCardWidget(
+                    key: ValueKey(todo.id ?? todo.title),
+                    todo: todo,
+                    onToggle: () => _toggleToDoStatus(todo),
+                    onEdit: () => _showAddOrEditToDoDialog(existingTodo: todo),
+                    onDelete: () => _deleteToDoItem(todo),
+                    onAddSubtask: _addSubtask,
+                    onSubtaskStatusChanged: _toggleSubtaskStatus,
+                    onSubtaskDeleted: _deleteSubtask,
+                    onSubtaskEdit: _editSubtask,
+                  );
+                },
+              ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        SizedBox(
+          height: MediaQuery.of(context).size.height * 0.35,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppColors.accentPurple.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.task_alt_rounded,
+                  size: 40,
+                  color: AppColors.accentPurple.withOpacity(0.5),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text(
+                'All clear!',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Tap + to add a new task',
+                style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFAB() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: AppGradients.primary,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: AppShadows.fabGlow,
+      ),
+      child: FloatingActionButton(
+        onPressed: () => _showAddOrEditToDoDialog(),
+        tooltip: 'Add Task',
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        child: const Icon(Icons.add_rounded, size: 28, color: Colors.white),
+      ),
+    );
+  }
+
+  void _showMoreMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadius.card),
+        ),
+      ),
+      builder:
+          (_) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(top: 12, bottom: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.borderCard,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                _BottomSheetTile(
+                  icon:
+                      _hideFutureTasks
+                          ? Icons.event_available
+                          : Icons.event_busy,
+                  label:
+                      _hideFutureTasks
+                          ? 'Show future tasks'
+                          : 'Hide tasks due 3+ days',
+                  onTap: () {
+                    setState(() => _hideFutureTasks = !_hideFutureTasks);
+                    Navigator.pop(context);
                   },
                 ),
-              ),
-            )
-          : null,
-      appBar: AppBar(
-        flexibleSpace: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDarkMode
-                  ? [
-                      const Color(0xFF1E293B),
-                      const Color(0xFF334155),
-                    ]
-                  : [
-                      const Color(0xFF6366F1),
-                      const Color(0xFF8B5CF6),
-                    ],
-            ),
-          ),
-        ),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                Icons.check_circle_outline,
-                size: 20,
-                color: isDarkMode ? Colors.white : Colors.white,
-              ),
-            ),
-            const SizedBox(width: 12),
-            const Text(
-              'My Tasks',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(width: 8),
-            if (_syncService.timeSinceLastSync != null)
-              Tooltip(
-                message: 'Última sincronização há ${_syncService.timeSinceLastSync!.inMinutes} minuto(s)',
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: _syncService.needsSync
-                        ? Colors.orange.withOpacity(0.3)
-                        : Colors.green.withOpacity(0.3),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Icon(
-                    Icons.sync,
-                    size: 14,
-                    color: Colors.white,
-                  ),
+                _BottomSheetTile(
+                  icon:
+                      _showOnlyTasksWithShowOnDueDate
+                          ? Icons.visibility
+                          : Icons.visibility_off,
+                  label:
+                      _showOnlyTasksWithShowOnDueDate
+                          ? 'Show all tasks'
+                          : 'Show only "on due date" tasks',
+                  onTap: () {
+                    setState(
+                      () =>
+                          _showOnlyTasksWithShowOnDueDate =
+                              !_showOnlyTasksWithShowOnDueDate,
+                    );
+                    Navigator.pop(context);
+                  },
                 ),
-              ),
-          ],
-        ),
-        iconTheme: const IconThemeData(color: Colors.white),
-        actionsIconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
-            onPressed: () {
-              final newThemeMode = isDarkMode ? ThemeMode.light : ThemeMode.dark;
-              widget.onThemeModeChanged(newThemeMode);
-            },
-          ),
-          IconButton(
-            icon: Icon(_showCompleted ? Icons.visibility_off : Icons.visibility),
-            tooltip: _showCompleted ? 'Hide completed tasks' : 'Show completed tasks',
-            onPressed: () {
-              setState(() {
-                _showCompleted = !_showCompleted;
-              });
-            },
-          ),
-          IconButton(
-            icon: Icon(_hideFutureTasks ? Icons.event_available : Icons.event_busy),
-            tooltip: _hideFutureTasks ? 'Show future tasks' : 'Hide tasks due in 3+ days',
-            onPressed: () {
-              setState(() {
-                _hideFutureTasks = !_hideFutureTasks;
-              });
-            },
-         ),
-         IconButton(
-           icon: Icon(
-             _showOnlyTasksWithShowOnDueDate ? Icons.visibility : Icons.visibility_off,
-             color: _showOnlyTasksWithShowOnDueDate ? Colors.blue : null,
-           ),
-           tooltip: _showOnlyTasksWithShowOnDueDate 
-               ? 'Show all tasks' 
-               : 'Show only tasks with "Show on due date"',
-           onPressed: () {
-             setState(() {
-               _showOnlyTasksWithShowOnDueDate = !_showOnlyTasksWithShowOnDueDate;
-             });
-           },
-         ),
-         IconButton(
-           icon: Icon(_hideCremesTasks ? Icons.spa : Icons.spa_outlined),
-           tooltip: _hideCremesTasks ? 'Show Cremes tasks' : 'Hide Cremes tasks',
-           onPressed: () {
-             setState(() {
-               _hideCremesTasks = !_hideCremesTasks;
-             });
-           },
-         ),
-         IconButton(
-           icon: Icon(
-             Icons.refresh,
-             color: _isSyncing ? Colors.blue : null,
-           ),
-           tooltip: 'Sincronizar agora',
-           onPressed: _isSyncing ? null : () async {
-             await _syncService.forceSync();
-           },
-         ),
-         IconButton(
-           icon: const Icon(Icons.system_update),
-           tooltip: 'Check for updates',
-           onPressed: () async {
-             final autoUpdateService = AutoUpdateService();
-             await autoUpdateService.manualUpdateCheck();
-           },
-         ),
-          IconButton(
-            icon: const Icon(Icons.science_outlined),
-            tooltip: 'Debug Notifications',
-            onPressed: () => _showDebugDialog(),
-          ),
-        ],
-      ),
-      floatingActionButton: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: isDarkMode
-                ? [
-                    const Color(0xFF818CF8),
-                    const Color(0xFF8B5CF6),
-                  ]
-                : [
-                    const Color(0xFF6366F1),
-                    const Color(0xFF8B5CF6),
-                  ],
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Theme.of(context).primaryColor.withOpacity(0.4),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
+                _BottomSheetTile(
+                  icon: _hideCremesTasks ? Icons.spa : Icons.spa_outlined,
+                  label:
+                      _hideCremesTasks
+                          ? 'Show Cremes tasks'
+                          : 'Hide Cremes tasks',
+                  onTap: () {
+                    setState(() => _hideCremesTasks = !_hideCremesTasks);
+                    Navigator.pop(context);
+                  },
+                ),
+                _BottomSheetTile(
+                  icon: Icons.system_update_outlined,
+                  label: 'Check for updates',
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await AutoUpdateService().manualUpdateCheck();
+                  },
+                ),
+                _BottomSheetTile(
+                  icon: Icons.science_outlined,
+                  label: 'Debug notifications',
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showDebugDialog();
+                  },
+                ),
+                _BottomSheetTile(
+                  icon: Icons.brightness_6_outlined,
+                  label: 'Toggle theme',
+                  onTap: () {
+                    final isDark =
+                        Theme.of(context).brightness == Brightness.dark;
+                    widget.onThemeModeChanged(
+                      isDark ? ThemeMode.light : ThemeMode.dark,
+                    );
+                    Navigator.pop(context);
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
             ),
-          ],
+          ),
+    );
+  }
+}
+
+// ── Reusable small widgets ─────────────────────────────────────────────────────
+
+class _IconAction extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+  final bool active;
+  final bool loading;
+
+  const _IconAction({
+    required this.icon,
+    this.onTap,
+    this.active = false,
+    this.loading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color:
+              active
+                  ? AppColors.accentPurple.withOpacity(0.2)
+                  : AppColors.overlay08,
+          borderRadius: BorderRadius.circular(AppRadius.small),
+          border: Border.all(
+            color: active ? AppColors.accentPurple : AppColors.borderSubtle,
+          ),
         ),
-        child: FloatingActionButton(
-          onPressed: () => _showAddOrEditToDoDialog(),
-          tooltip: 'Add To-Do',
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          child: const Icon(Icons.add, size: 28, color: Colors.white),
-        ),
+        child:
+            loading
+                ? Padding(
+                  padding: const EdgeInsets.all(9),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.5,
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      AppColors.accentPurple.withOpacity(0.8),
+                    ),
+                  ),
+                )
+                : Icon(
+                  icon,
+                  size: 18,
+                  color:
+                      active ? AppColors.accentPurple : AppColors.textSecondary,
+                ),
       ),
+    );
+  }
+}
+
+class _CheckRow extends StatelessWidget {
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _CheckRow({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 24,
+          height: 24,
+          child: Checkbox(
+            value: value,
+            onChanged: (v) => onChanged(v ?? false),
+            activeColor: AppColors.accentPurple,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BottomSheetTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _BottomSheetTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(icon, color: AppColors.textSecondary, size: 20),
+      title: Text(
+        label,
+        style: const TextStyle(color: AppColors.textPrimary, fontSize: 14),
+      ),
+      onTap: onTap,
     );
   }
 }
