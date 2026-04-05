@@ -4,7 +4,10 @@
       "Bash(flutter analyze:*)",
       "Bash(flutter run:*)",
       "Bash(timeout:*)",
-      "Bash(flutter:*)"
+      "Bash(flutter:*)",
+      "mcp__6d93fa4d-a026-4016-b738-51bfaa41eff7__list_projects",
+      "mcp__6d93fa4d-a026-4016-b738-51bfaa41eff7__apply_migration",
+      "mcp__6d93fa4d-a026-4016-b738-51bfaa41eff7__execute_sql"
     ],
     "deny": [],
     "ask": []

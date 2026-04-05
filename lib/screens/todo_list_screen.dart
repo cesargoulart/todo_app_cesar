@@ -91,7 +91,16 @@ class _ToDoListScreenState extends State<ToDoListScreen>
             }).toList();
         break;
       case TodoFilter.done:
-        return filtered.where((t) => t.isDone).toList();
+        final doneList = filtered.where((t) => t.isDone).toList();
+        doneList.sort((a, b) {
+          final aDate = a.completedAt;
+          final bDate = b.completedAt;
+          if (aDate == null && bDate == null) return 0;
+          if (aDate == null) return 1;
+          if (bDate == null) return -1;
+          return bDate.compareTo(aDate);
+        });
+        return doneList;
       case TodoFilter.all:
         break;
     }
@@ -144,6 +153,21 @@ class _ToDoListScreenState extends State<ToDoListScreen>
           filtered
               .where((t) => t.labels.any((l) => l.id == _filterByLabel!.id))
               .toList();
+    }
+
+    // When showing completed tasks, sort: pending first (by dueDate), then done (by completedAt desc)
+    if (_showCompleted) {
+      final pending = filtered.where((t) => !t.isDone).toList();
+      final done = filtered.where((t) => t.isDone).toList();
+      done.sort((a, b) {
+        final aDate = a.completedAt;
+        final bDate = b.completedAt;
+        if (aDate == null && bDate == null) return 0;
+        if (aDate == null) return 1;
+        if (bDate == null) return -1;
+        return bDate.compareTo(aDate); // most recent first
+      });
+      filtered = [...pending, ...done];
     }
 
     return filtered;
@@ -241,7 +265,11 @@ class _ToDoListScreenState extends State<ToDoListScreen>
       return;
     }
     final originalStatus = todo.isDone;
-    setState(() => todo.isDone = !todo.isDone);
+    final originalCompletedAt = todo.completedAt;
+    setState(() {
+      todo.isDone = !todo.isDone;
+      todo.completedAt = todo.isDone ? DateTime.now() : null;
+    });
     try {
       if (todo.isDone) {
         if (todo.id != null) {
@@ -265,7 +293,10 @@ class _ToDoListScreenState extends State<ToDoListScreen>
       }
       await _syncService.saveTodoSafely(todo);
     } catch (e) {
-      setState(() => todo.isDone = originalStatus);
+      setState(() {
+        todo.isDone = originalStatus;
+        todo.completedAt = originalCompletedAt;
+      });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

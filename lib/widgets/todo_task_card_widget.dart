@@ -335,8 +335,27 @@ class _TodoTaskCardWidgetState extends State<TodoTaskCardWidget>
                               ),
                             ),
                           const SizedBox(width: 6),
-                          // Due time
-                          if (widget.todo.dueDate != null)
+                          // Completed at date
+                          if (widget.todo.isDone && widget.todo.completedAt != null)
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.check_circle_outline_rounded,
+                                  size: 12,
+                                  color: AppColors.accentGreen,
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  DateFormat('dd/MM HH:mm')
+                                      .format(widget.todo.completedAt!),
+                                  style: AppTextStyles.timeText.copyWith(
+                                    color: AppColors.accentGreen,
+                                  ),
+                                ),
+                              ],
+                            )
+                          // Due time (only when not done)
+                          else if (!widget.todo.isDone && widget.todo.dueDate != null)
                             Row(
                               children: [
                                 Icon(

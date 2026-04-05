@@ -60,6 +60,7 @@ class ToDoItem {
   DateTime? recurrenceEndDate;  String? originalRecurringTaskId; // For instances generated from recurring tasks
   DateTime? nextOccurrenceDate;
   List<Label> labels = []; // Labels assigned to this task
+  DateTime? completedAt; // Date when the task was marked as done
   ToDoItem({
     this.id, // Allow ID to be passed in
     required this.title,
@@ -73,6 +74,7 @@ class ToDoItem {
     this.originalRecurringTaskId,
     this.nextOccurrenceDate,
     List<Label>? labels,
+    this.completedAt,
   }) {
     this.labels = labels ?? [];
   }
@@ -89,6 +91,7 @@ class ToDoItem {
       'recurrence_end_date': recurrenceEndDate?.toIso8601String(),
       'original_recurring_task_id': originalRecurringTaskId,
       'next_occurrence_date': nextOccurrenceDate?.toIso8601String(),
+      'completed_at': completedAt?.toIso8601String(),
     };
     // Only include the ID if it's not null.
     // This is crucial for letting Supabase generate the ID for new items.
@@ -120,6 +123,7 @@ class ToDoItem {
       originalRecurringTaskId: json['original_recurring_task_id'],
       nextOccurrenceDate: json['next_occurrence_date'] != null ? DateTime.parse(json['next_occurrence_date']) : null,
       labels: parsedLabels,
+      completedAt: json['completed_at'] != null ? DateTime.parse(json['completed_at']) : null,
     );
     // Note: Subtasks would need to be loaded separately if stored in a related table.
     // This model assumes they are handled in-memory or via a separate query.
