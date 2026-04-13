@@ -79,37 +79,42 @@ class _LabelPickerWidgetState extends State<LabelPickerWidget> {
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 8,
-                    children: [
-                      Colors.red,
-                      Colors.pink,
-                      Colors.purple,
-                      Colors.blue,
-                      Colors.cyan,
-                      Colors.teal,
-                      Colors.green,
-                      Colors.orange,
-                      Colors.brown,
-                      Colors.grey,
-                    ].map((color) {
-                      return GestureDetector(
-                        onTap: () {
-                          setDialogState(() {
-                            selectedColor = color;
-                          });
-                        },
-                        child: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: color,
-                            shape: BoxShape.circle,
-                            border: selectedColor == color
-                                ? Border.all(color: Colors.black, width: 3)
-                                : null,
-                          ),
-                        ),
-                      );
-                    }).toList(),
+                    children:
+                        [
+                          Colors.red,
+                          Colors.pink,
+                          Colors.purple,
+                          Colors.blue,
+                          Colors.cyan,
+                          Colors.teal,
+                          Colors.green,
+                          Colors.orange,
+                          Colors.brown,
+                          Colors.grey,
+                        ].map((color) {
+                          return GestureDetector(
+                            onTap: () {
+                              setDialogState(() {
+                                selectedColor = color;
+                              });
+                            },
+                            child: Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: color,
+                                shape: BoxShape.circle,
+                                border:
+                                    selectedColor == color
+                                        ? Border.all(
+                                          color: Colors.black,
+                                          width: 3,
+                                        )
+                                        : null,
+                              ),
+                            ),
+                          );
+                        }).toList(),
                   ),
                 ],
               ),
@@ -128,7 +133,7 @@ class _LabelPickerWidgetState extends State<LabelPickerWidget> {
                         );
                         await _loadLabels();
                         Navigator.of(context).pop();
-                        
+
                         // Auto-select the new label
                         _toggleLabel(newLabel);
                       } catch (e) {
@@ -187,21 +192,25 @@ class _LabelPickerWidgetState extends State<LabelPickerWidget> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: _allLabels.map((label) {
-              final isSelected = _selectedLabels.any((l) => l.id == label.id);
-              return FilterChip(
-                label: Text(label.name),
-                selected: isSelected,
-                onSelected: (_) => _toggleLabel(label),
-                backgroundColor: _parseColor(label.color).withOpacity(0.2),
-                selectedColor: _parseColor(label.color).withOpacity(0.6),
-                checkmarkColor: Colors.white,
-                labelStyle: TextStyle(
-                  color: Colors.white,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                ),
-              );
-            }).toList(),
+            children:
+                _allLabels.map((label) {
+                  final isSelected = _selectedLabels.any(
+                    (l) => l.id == label.id,
+                  );
+                  return FilterChip(
+                    label: Text(label.name),
+                    selected: isSelected,
+                    onSelected: (_) => _toggleLabel(label),
+                    backgroundColor: _parseColor(label.color).withOpacity(0.2),
+                    selectedColor: _parseColor(label.color).withOpacity(0.6),
+                    checkmarkColor: Colors.white,
+                    labelStyle: TextStyle(
+                      color: Colors.white,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  );
+                }).toList(),
           ),
       ],
     );
