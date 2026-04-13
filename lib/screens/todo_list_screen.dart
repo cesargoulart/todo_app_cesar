@@ -20,6 +20,7 @@ import '../widgets/label_picker_widget.dart';
 import '../theme/app_theme.dart';
 import '../widgets/todo_filter_chips_widget.dart';
 import '../widgets/todo_task_card_widget.dart';
+import '../widgets/note_card_widget.dart';
 
 class ToDoListScreen extends StatefulWidget {
   final Function(ThemeMode) onThemeModeChanged;
@@ -58,14 +59,35 @@ class _ToDoListScreenState extends State<ToDoListScreen>
   late AnimationController _headerCtrl;
   late Animation<double> _headerFade;
 
+  bool get _isNotasView =>
+      _filterByLabel?.name.toLowerCase() == 'notas';
+
   List<ToDoItem> get _filteredTodos {
-    List<ToDoItem> filtered = List.from(_todos);
+    // Only show top-level tasks; subtasks live inside their parent's card
+    List<ToDoItem> filtered =
+        _todos.where((t) => t.parentId == null).toList();
 
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
     // Tab filter
     switch (_activeFilter) {
+      case TodoFilter.personal:
+        // Show only Personal-labelled tasks (pending only)
+        filtered = filtered
+            .where((t) =>
+                !t.isDone &&
+                t.labels.any((l) => l.name.toLowerCase() == 'personal'))
+            .toList();
+        filtered.sort((a, b) {
+          final aDate = a.dueDate;
+          final bDate = b.dueDate;
+          if (aDate == null && bDate == null) return 0;
+          if (aDate == null) return 1;
+          if (bDate == null) return -1;
+          return aDate.compareTo(bDate);
+        });
+        return filtered;
       case TodoFilter.today:
         filtered =
             filtered.where((t) {
@@ -91,9 +113,32 @@ class _ToDoListScreenState extends State<ToDoListScreen>
             }).toList();
         break;
       case TodoFilter.done:
-        return filtered.where((t) => t.isDone).toList();
+        final doneList = filtered.where((t) => t.isDone).toList();
+        doneList.sort((a, b) {
+          final aDate = a.completedAt;
+          final bDate = b.completedAt;
+          if (aDate == null && bDate == null) return 0;
+          if (aDate == null) return 1;
+          if (bDate == null) return -1;
+          return bDate.compareTo(aDate);
+        });
+        return doneList;
       case TodoFilter.all:
         break;
+    }
+
+    // Exclude Personal and Notas tasks unless their label is explicitly selected
+    if (_filterByLabel?.name.toLowerCase() != 'personal') {
+      filtered = filtered
+          .where(
+              (t) => !t.labels.any((l) => l.name.toLowerCase() == 'personal'))
+          .toList();
+    }
+    if (_filterByLabel?.name.toLowerCase() != 'notas') {
+      filtered = filtered
+          .where(
+              (t) => !t.labels.any((l) => l.name.toLowerCase() == 'notas'))
+          .toList();
     }
 
     // Hide completed
@@ -144,6 +189,33 @@ class _ToDoListScreenState extends State<ToDoListScreen>
           filtered
               .where((t) => t.labels.any((l) => l.id == _filterByLabel!.id))
               .toList();
+    }
+
+    // Sort by due date for "All" view — tasks without date go to the end
+    if (_activeFilter == TodoFilter.all) {
+      filtered.sort((a, b) {
+        final aDate = a.dueDate;
+        final bDate = b.dueDate;
+        if (aDate == null && bDate == null) return 0;
+        if (aDate == null) return 1;
+        if (bDate == null) return -1;
+        return aDate.compareTo(bDate);
+      });
+    }
+
+    // When showing completed tasks, sort: pending first (by dueDate), then done (by completedAt desc)
+    if (_showCompleted) {
+      final pending = filtered.where((t) => !t.isDone).toList();
+      final done = filtered.where((t) => t.isDone).toList();
+      done.sort((a, b) {
+        final aDate = a.completedAt;
+        final bDate = b.completedAt;
+        if (aDate == null && bDate == null) return 0;
+        if (aDate == null) return 1;
+        if (bDate == null) return -1;
+        return bDate.compareTo(aDate); // most recent first
+      });
+      filtered = [...pending, ...done];
     }
 
     return filtered;
@@ -230,9 +302,6 @@ class _ToDoListScreenState extends State<ToDoListScreen>
   }
 
   // ── Business logic ────────────────────────────────────────────────────────────
-  Future<void> _saveTodosToStorage() async =>
-      _syncService.saveTodosSafely(_todos);
-
   void _toggleToDoStatus(ToDoItem todo) async {
     if (!_isServiceReady()) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -241,7 +310,11 @@ class _ToDoListScreenState extends State<ToDoListScreen>
       return;
     }
     final originalStatus = todo.isDone;
-    setState(() => todo.isDone = !todo.isDone);
+    final originalCompletedAt = todo.completedAt;
+    setState(() {
+      todo.isDone = !todo.isDone;
+      todo.completedAt = todo.isDone ? DateTime.now() : null;
+    });
     try {
       if (todo.isDone) {
         if (todo.id != null) {
@@ -265,7 +338,10 @@ class _ToDoListScreenState extends State<ToDoListScreen>
       }
       await _syncService.saveTodoSafely(todo);
     } catch (e) {
-      setState(() => todo.isDone = originalStatus);
+      setState(() {
+        todo.isDone = originalStatus;
+        todo.completedAt = originalCompletedAt;
+      });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -770,11 +846,10 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                         }
                                         if (isSubtask && parentTodo != null) {
                                           newTodo.parentId = parentTodo.id;
-                                          final saved = await _syncService
+                                          await _syncService
                                               .saveTodoSafely(newTodo);
-                                          setState(
-                                            () => parentTodo.addSubtask(saved),
-                                          );
+                                          // The sync service already adds the subtask
+                                          // to the parent in the cache and notifies the UI
                                         } else {
                                           final saved = await _syncService
                                               .saveTodoSafely(newTodo);
@@ -828,7 +903,9 @@ class _ToDoListScreenState extends State<ToDoListScreen>
 
   void _toggleSubtaskStatus(ToDoItem parent, ToDoItem subtask) {
     setState(() => subtask.isDone = !subtask.isDone);
-    _saveTodosToStorage();
+    if (subtask.id != null) {
+      _syncService.saveTodoSafely(subtask);
+    }
   }
 
   void _deleteSubtask(ToDoItem parent, ToDoItem subtask) {
@@ -862,7 +939,9 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                   setState(() {
                     if (subtask.id != null) parent.removeSubtask(subtask.id!);
                   });
-                  _saveTodosToStorage();
+                  if (subtask.id != null) {
+                    _syncService.deleteTodoSafely(subtask.id!);
+                  }
                   Navigator.of(ctx).pop();
                 },
               ),
@@ -1283,7 +1362,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                       () async => await AutoUpdateService().manualUpdateCheck(),
                 ),
                 const SizedBox(width: 8),
-            
+
                 _IconAction(
                   icon: Icons.brightness_6_outlined,
                   onTap: () {
@@ -1465,6 +1544,15 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                 itemCount: _filteredTodos.length,
                 itemBuilder: (context, index) {
                   final todo = _filteredTodos[index];
+                  if (_isNotasView) {
+                    return NoteCardWidget(
+                      key: ValueKey(todo.id ?? todo.title),
+                      note: todo,
+                      onEdit: () =>
+                          _showAddOrEditNoteDialog(existingNote: todo),
+                      onDelete: () => _deleteToDoItem(todo),
+                    );
+                  }
                   return TodoTaskCardWidget(
                     key: ValueKey(todo.id ?? todo.title),
                     todo: todo,
@@ -1532,11 +1620,161 @@ class _ToDoListScreenState extends State<ToDoListScreen>
         boxShadow: AppShadows.fabGlow,
       ),
       child: FloatingActionButton(
-        onPressed: () => _showAddOrEditToDoDialog(),
-        tooltip: 'Add Task',
+        onPressed: () => _isNotasView
+            ? _showAddOrEditNoteDialog()
+            : _showAddOrEditToDoDialog(),
+        tooltip: _isNotasView ? 'Add Note' : 'Add Task',
         backgroundColor: Colors.transparent,
         elevation: 0,
         child: const Icon(Icons.add_rounded, size: 28, color: Colors.white),
+      ),
+    );
+  }
+
+  // ── Notes dialog ──────────────────────────────────────────────────────────────
+
+  void _showAddOrEditNoteDialog({ToDoItem? existingNote}) {
+    final titleCtrl =
+        TextEditingController(text: existingNote?.title ?? '');
+    final bodyCtrl =
+        TextEditingController(text: existingNote?.body ?? '');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(ctx).viewInsets.bottom,
+        ),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: AppColors.bgSurface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Handle bar
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.borderSubtle,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                existingNote == null ? 'New Note' : 'Edit Note',
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Title field
+              TextField(
+                controller: titleCtrl,
+                autofocus: true,
+                style: const TextStyle(
+                    color: AppColors.textPrimary, fontSize: 15),
+                decoration: InputDecoration(
+                  hintText: 'Title',
+                  hintStyle: const TextStyle(color: AppColors.textMuted),
+                  filled: true,
+                  fillColor: AppColors.overlay08,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Body field
+              TextField(
+                controller: bodyCtrl,
+                maxLines: 5,
+                style: const TextStyle(
+                    color: AppColors.textPrimary, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Write your note…',
+                  hintStyle: const TextStyle(color: AppColors.textMuted),
+                  filled: true,
+                  fillColor: AppColors.overlay08,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.accentPurple,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    elevation: 0,
+                  ),
+                  onPressed: () async {
+                    final title = titleCtrl.text.trim();
+                    if (title.isEmpty) return;
+                    Navigator.of(ctx).pop();
+                    try {
+                      if (existingNote != null) {
+                        existingNote.title = title;
+                        existingNote.body = bodyCtrl.text.trim();
+                        await _syncService.saveTodoSafely(existingNote);
+                      } else {
+                        final note = ToDoItem(
+                          title: title,
+                          body: bodyCtrl.text.trim(),
+                          createdAt: DateTime.now(),
+                        );
+                        // Assign Notas label
+                        final saved =
+                            await _syncService.saveTodoSafely(note);
+                        if (saved.id != null && _filterByLabel != null) {
+                          await _labelService.addLabelToTask(
+                              saved.id!, _filterByLabel!.id!);
+                          if (mounted) {
+                            setState(() {
+                              saved.labels = [_filterByLabel!];
+                            });
+                          }
+                        }
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error saving note: $e')),
+                        );
+                      }
+                    }
+                  },
+                  child: Text(
+                    existingNote == null ? 'Save Note' : 'Update Note',
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -8,7 +8,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
-enum TodoFilter { all, today, upcoming, done }
+enum TodoFilter { all, today, upcoming, done, personal }
 
 extension TodoFilterLabel on TodoFilter {
   String get label {
@@ -17,6 +17,7 @@ extension TodoFilterLabel on TodoFilter {
       case TodoFilter.today:    return 'Today';
       case TodoFilter.upcoming: return 'Upcoming';
       case TodoFilter.done:     return 'Done';
+      case TodoFilter.personal: return 'Personal';
     }
   }
 }

@@ -197,7 +197,7 @@ class _LabelPickerWidgetState extends State<LabelPickerWidget> {
                 selectedColor: _parseColor(label.color).withOpacity(0.6),
                 checkmarkColor: Colors.white,
                 labelStyle: TextStyle(
-                  color: isSelected ? Colors.white : Colors.black,
+                  color: Colors.white,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                 ),
               );

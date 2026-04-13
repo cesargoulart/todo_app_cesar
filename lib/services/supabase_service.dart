@@ -46,8 +46,21 @@ class SupabaseService {
           todo.labels = await _labelService.getLabelsForTask(todo.id!);
         }
       }
-      
-      return todos;
+
+      // Assemble subtasks into their parent tasks
+      final todoMap = <String, ToDoItem>{
+        for (final t in todos) if (t.id != null) t.id!: t,
+      };
+      final topLevel = <ToDoItem>[];
+      for (final todo in todos) {
+        if (todo.parentId != null && todoMap.containsKey(todo.parentId)) {
+          todoMap[todo.parentId]!.subtasks.add(todo);
+        } else if (todo.parentId == null) {
+          topLevel.add(todo);
+        }
+      }
+
+      return topLevel;
     } catch (e) {
       print('Error loading todos: $e');
       return [];    }

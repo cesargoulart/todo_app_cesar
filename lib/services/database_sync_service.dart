@@ -228,18 +228,36 @@ class DatabaseSyncService {
   Future<ToDoItem> saveTodoSafely(ToDoItem todo) async {
     return await wrapUserOperation(() async {
       final savedTodo = await _supabaseService.saveTodo(todo);
-      
-      // Atualiza o cache local
-      final index = _currentTodos.indexWhere((t) => t.id == savedTodo.id);
-      if (index != -1) {
-        _currentTodos[index] = savedTodo;
+
+      if (savedTodo.parentId != null) {
+        // It's a subtask — add it to its parent in the cache, not as top-level
+        final parentIndex =
+            _currentTodos.indexWhere((t) => t.id == savedTodo.parentId);
+        if (parentIndex != -1) {
+          final parent = _currentTodos[parentIndex];
+          final subtaskIndex =
+              parent.subtasks.indexWhere((s) => s.id == savedTodo.id);
+          if (subtaskIndex != -1) {
+            parent.subtasks[subtaskIndex] = savedTodo;
+          } else {
+            parent.subtasks.add(savedTodo);
+          }
+        }
       } else {
-        _currentTodos.add(savedTodo);
+        // It's a top-level task — update or add in the cache
+        final index = _currentTodos.indexWhere((t) => t.id == savedTodo.id);
+        if (index != -1) {
+          // Preserve in-memory subtasks that may not have synced yet
+          savedTodo.subtasks = _currentTodos[index].subtasks;
+          _currentTodos[index] = savedTodo;
+        } else {
+          _currentTodos.add(savedTodo);
+        }
       }
-      
+
       // Notifica a UI
       onDataUpdated?.call(_currentTodos);
-      
+
       return savedTodo;
     });
   }

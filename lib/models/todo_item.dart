@@ -48,6 +48,7 @@ class ToDoItem {
   // and will have a value after being saved to the database.
   String? id;
   String title;
+  String? body; // Note text body (used in Notas view)
   bool isDone;
   DateTime? dueDate;
   bool showOnlyOnDueDate; // New field: if true, task only appears on/after due date
@@ -59,19 +60,24 @@ class ToDoItem {
   RecurrenceInterval recurrenceInterval;
   DateTime? recurrenceEndDate;  String? originalRecurringTaskId; // For instances generated from recurring tasks
   DateTime? nextOccurrenceDate;
+  DateTime? createdAt;
+  DateTime? completedAt; // Date when the task was marked as done
   List<Label> labels = []; // Labels assigned to this task
   ToDoItem({
-    this.id, // Allow ID to be passed in
+    this.id,
     required this.title,
+    this.body,
     this.isDone = false,
     this.dueDate,
-    this.showOnlyOnDueDate = false, // Default to false (show immediately)
+    this.showOnlyOnDueDate = false,
     this.parentId,
     this.isRecurring = false,
     this.recurrenceInterval = RecurrenceInterval.none,
     this.recurrenceEndDate,
     this.originalRecurringTaskId,
     this.nextOccurrenceDate,
+    this.createdAt,
+    this.completedAt,
     List<Label>? labels,
   }) {
     this.labels = labels ?? [];
@@ -80,6 +86,7 @@ class ToDoItem {
   Map<String, dynamic> toJson() {
     final Map<String, dynamic> data = {
       'title': title,
+      'body': body,
       'is_done': isDone,
       'due_date': dueDate?.toIso8601String(),
       'show_only_on_due_date': showOnlyOnDueDate,
@@ -89,7 +96,11 @@ class ToDoItem {
       'recurrence_end_date': recurrenceEndDate?.toIso8601String(),
       'original_recurring_task_id': originalRecurringTaskId,
       'next_occurrence_date': nextOccurrenceDate?.toIso8601String(),
+      'completed_at': completedAt?.toIso8601String(),
     };
+    if (createdAt != null) {
+      data['created_at'] = createdAt!.toIso8601String();
+    }
     // Only include the ID if it's not null.
     // This is crucial for letting Supabase generate the ID for new items.
     if (id != null) {
@@ -110,6 +121,7 @@ class ToDoItem {
     final item = ToDoItem(
       id: json['id'],
       title: json['title'],
+      body: json['body'],
       isDone: json['is_done'] ?? false,
       dueDate: json['due_date'] != null ? DateTime.parse(json['due_date']) : null,
       showOnlyOnDueDate: json['show_only_on_due_date'] ?? false,
@@ -119,6 +131,8 @@ class ToDoItem {
       recurrenceEndDate: json['recurrence_end_date'] != null ? DateTime.parse(json['recurrence_end_date']) : null,
       originalRecurringTaskId: json['original_recurring_task_id'],
       nextOccurrenceDate: json['next_occurrence_date'] != null ? DateTime.parse(json['next_occurrence_date']) : null,
+      createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : null,
+      completedAt: json['completed_at'] != null ? DateTime.parse(json['completed_at']) : null,
       labels: parsedLabels,
     );
     // Note: Subtasks would need to be loaded separately if stored in a related table.

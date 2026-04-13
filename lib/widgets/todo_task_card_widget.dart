@@ -335,8 +335,27 @@ class _TodoTaskCardWidgetState extends State<TodoTaskCardWidget>
                               ),
                             ),
                           const SizedBox(width: 6),
-                          // Due time
-                          if (widget.todo.dueDate != null)
+                          // Completed at date
+                          if (widget.todo.isDone && widget.todo.completedAt != null)
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.check_circle_outline_rounded,
+                                  size: 12,
+                                  color: AppColors.accentGreen,
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  DateFormat('dd/MM HH:mm')
+                                      .format(widget.todo.completedAt!),
+                                  style: AppTextStyles.timeText.copyWith(
+                                    color: AppColors.accentGreen,
+                                  ),
+                                ),
+                              ],
+                            )
+                          // Due time (only when not done)
+                          else if (!widget.todo.isDone && widget.todo.dueDate != null)
                             Row(
                               children: [
                                 Icon(
@@ -461,30 +480,30 @@ class _AnimatedCheckbox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: scaleAnim,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        width: 24,
-        height: 24,
-        decoration: isDone
-            ? BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                gradient: AppGradients.done,
-              )
-            : BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: AppColors.overlay08,
-                border: Border.all(
-                  color: Colors.white.withOpacity(0.2),
-                  width: 1.5,
-                ),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      width: 24,
+      height: 24,
+      decoration: isDone
+          ? BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              gradient: AppGradients.done,
+            )
+          : BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              color: Colors.transparent,
+              border: Border.all(
+                color: AppColors.textSecondary,
+                width: 1.5,
               ),
-        child: isDone
-            ? const Icon(Icons.check_rounded,
-                size: 15, color: Colors.white)
-            : null,
-      ),
+            ),
+      child: isDone
+          ? ScaleTransition(
+              scale: scaleAnim,
+              child: const Icon(Icons.check_rounded,
+                  size: 15, color: Colors.white),
+            )
+          : null,
     );
   }
 }
