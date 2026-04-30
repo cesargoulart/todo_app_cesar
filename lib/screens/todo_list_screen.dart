@@ -239,6 +239,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _deadlineMonitor.initialize(context);
+    _deadlineMonitor.onMarkDone = (task) => _toggleToDoStatus(task);
   }
 
   @override

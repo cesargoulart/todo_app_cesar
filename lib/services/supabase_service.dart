@@ -109,9 +109,17 @@ class SupabaseService {
       // Return the todo with the database-generated ID
       ToDoItem savedTodo = ToDoItem.fromJson(response);
       
-      // Schedule notifications for tasks with due dates
-      if (savedTodo.id != null && savedTodo.dueDate != null && !savedTodo.isDone) {
-        await _scheduleNotificationsForTask(savedTodo);
+      // Keep local notifications in sync with the persisted task state.
+      try {
+        if (savedTodo.id != null) {
+          if (savedTodo.dueDate != null && !savedTodo.isDone) {
+            await _scheduleNotificationsForTask(savedTodo);
+          } else {
+            await _notificationService.cancelTaskNotifications(savedTodo.id!);
+          }
+        }
+      } catch (notifError) {
+        print('Warning: Notification update failed after save: $notifError');
       }
       
       return savedTodo;

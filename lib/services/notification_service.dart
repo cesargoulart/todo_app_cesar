@@ -16,16 +16,11 @@ class NotificationService {
 
   Future<void> initialize() async {
     try {
-      print('🔔 Initializing NotificationService...');
-      
-      // Initialize timezone data
       tz.initializeTimeZones();
-      print('✅ Timezone initialized');
 
-      // Android initialization
-      const AndroidInitializationSettings androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const AndroidInitializationSettings androidSettings =
+          AndroidInitializationSettings('@mipmap/ic_launcher');
 
-      // iOS initialization  
       const DarwinInitializationSettings iosSettings = DarwinInitializationSettings(
         requestSoundPermission: true,
         requestBadgePermission: true,
@@ -37,25 +32,15 @@ class NotificationService {
         iOS: iosSettings,
       );
 
-      final initialized = await _notifications.initialize(
+      await _notifications.initialize(
         initSettings,
         onDidReceiveNotificationResponse: _onNotificationTapped,
       );
-      
-      print('🔔 Plugin initialized: $initialized');
 
-      // Create notification channel for Android
       await _createNotificationChannel();
-      print('✅ Notification channel created');
-
-      // Request permissions
       await _requestPermissions();
-      print('✅ Permissions requested');
-      
-      print('🎉 NotificationService initialization completed successfully!');
     } catch (e, stackTrace) {
-      print('❌ Error initializing notifications: $e');
-      print('📍 Stack trace: $stackTrace');
+      debugPrint('Error initializing notifications: $e\n$stackTrace');
     }
   }
 
@@ -68,82 +53,55 @@ class NotificationService {
       playSound: true,
     );
 
-    await _notifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+    await _notifications
+        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
   }
 
   Future<void> _requestPermissions() async {
     try {
-      print('🔑 Requesting notification permissions...');
-      
-      final androidPlugin = _notifications.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-      final iosPlugin = _notifications.resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
+      final androidPlugin = _notifications
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      final iosPlugin = _notifications
+          .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
 
-      // Request Android permissions (for Android 13+)
       if (androidPlugin != null) {
-        print('📱 Requesting Android permissions...');
-        final permission = await androidPlugin.requestNotificationsPermission();
-        print('📱 Android notification permission granted: $permission');
-        
-        // Also request exact alarm permission
-        final exactAlarmPermission = await androidPlugin.requestExactAlarmsPermission();
-        print('⏰ Exact alarm permission granted: $exactAlarmPermission');
-      } else {
-        print('❌ Android plugin not available');
+        await androidPlugin.requestNotificationsPermission();
+        await androidPlugin.requestExactAlarmsPermission();
+        await androidPlugin.requestFullScreenIntentPermission();
       }
 
-      // Request iOS permissions
       if (iosPlugin != null) {
-        print('🍎 Requesting iOS permissions...');
-        final permission = await iosPlugin.requestPermissions(
-          alert: true,
-          badge: true,
-          sound: true,
-        );
-        print('🍎 iOS permission granted: $permission');
-      } else {
-        print('❌ iOS plugin not available');
+        await iosPlugin.requestPermissions(alert: true, badge: true, sound: true);
       }
-    } catch (e, stackTrace) {
-      print('❌ Error requesting permissions: $e');
-      print('📍 Stack trace: $stackTrace');
+    } catch (e) {
+      debugPrint('Error requesting notification permissions: $e');
     }
   }
 
   void _onNotificationTapped(NotificationResponse response) {
-    // Handle notification tap
-    print('Notification tapped: ${response.payload}');
-    // You can add navigation logic here if needed
+    debugPrint('Notification tapped: ${response.payload}');
   }
 
-  /// Schedule a notification for when a task is due
+  // DateTime already represents the instant selected by the user; schedule it
+  // in UTC so one-shot alerts do not depend on tz.local being configured.
+  tz.TZDateTime _scheduledInstant(DateTime date) =>
+      tz.TZDateTime.from(date, tz.UTC);
+
+  tz.TZDateTime _now() => tz.TZDateTime.now(tz.UTC);
+
+  /// Schedule a notification for when a task is due.
   Future<void> scheduleTaskDueNotification({
     required String taskId,
     required String taskTitle,
     required DateTime dueDate,
   }) async {
     try {
-      // Create TZDateTime from local DateTime properly
-      final scheduledDate = tz.TZDateTime(
-        tz.local,
-        dueDate.year,
-        dueDate.month,
-        dueDate.day,
-        dueDate.hour,
-        dueDate.minute,
-        dueDate.second,
-      );
-      
-      print('📅 Scheduling due notification for task: $taskTitle');
-      print('📅 Due date (input): $dueDate');
-      print('📅 Scheduled for (TZDateTime): $scheduledDate');
-      print('📅 Current time: ${tz.TZDateTime.now(tz.local)}');
-      print('📅 Time until due: ${scheduledDate.difference(tz.TZDateTime.now(tz.local))}');
-      print('📅 Is in future: ${scheduledDate.isAfter(tz.TZDateTime.now(tz.local))}');
-      
-      // Only schedule if the due date is in the future
-      if (scheduledDate.isAfter(tz.TZDateTime.now(tz.local))) {        await _notifications.zonedSchedule(
-          taskId.hashCode, // Use task ID hash as notification ID
+      final scheduledDate = _scheduledInstant(dueDate);
+
+      if (scheduledDate.isAfter(_now())) {
+        await _notifications.zonedSchedule(
+          taskId.hashCode,
           'Task Due! 🔔',
           'Task "$taskTitle" is due now',
           scheduledDate,
@@ -152,15 +110,12 @@ class NotificationService {
               _channelId,
               _channelName,
               channelDescription: _channelDescription,
-              importance: Importance.max, // Use max importance to ensure it shows
+              importance: Importance.max,
               priority: Priority.high,
               playSound: true,
               enableVibration: true,
-              ticker: 'Task Due', // Ticker text for older Android versions
+              ticker: 'Task Due',
               showWhen: true,
-              when: null,
-              usesChronometer: false,
-              timeoutAfter: null,
               category: AndroidNotificationCategory.reminder,
               fullScreenIntent: true,
               icon: '@mipmap/ic_launcher',
@@ -172,37 +127,73 @@ class NotificationService {
               interruptionLevel: InterruptionLevel.timeSensitive,
             ),
           ),
-        payload: 'task_due:$taskId',
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-      );
-      print('✅ Due notification scheduled successfully for: $taskTitle');
-    } else {
-      print('❌ Due notification NOT scheduled (date is in the past): $taskTitle');
-    }
-    } catch (e, stackTrace) {
-      print('❌ Error scheduling due notification: $e');
-      print('📍 Stack trace: $stackTrace');
+          payload: 'task_due:$taskId',
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+        );
+      }
+    } catch (e) {
+      debugPrint('Error scheduling due notification for "$taskTitle": $e');
     }
   }
 
-  /// Schedule a reminder notification before the task is due
+  /// Schedule a reminder notification before the task is due.
+  /// Each duration produces a unique notification ID to avoid collisions
+  /// (e.g. the 1-hour and 1-day reminders no longer overwrite each other).
   Future<void> scheduleTaskReminderNotification({
     required String taskId,
     required String taskTitle,
     required DateTime dueDate,
     required Duration reminderBefore,
   }) async {
-    final reminderDate = dueDate.subtract(reminderBefore);
-    final scheduledDate = tz.TZDateTime.from(reminderDate, tz.local);
-    
-    // Only schedule if the reminder date is in the future
-    if (scheduledDate.isAfter(tz.TZDateTime.now(tz.local))) {
-      await _notifications.zonedSchedule(
-        '${taskId}_reminder'.hashCode, // Use task ID + reminder as notification ID
-        'Task Reminder',
-        'Task "$taskTitle" is due ${_formatReminderTime(reminderBefore)}',
-        scheduledDate,
+    try {
+      final reminderDate = dueDate.subtract(reminderBefore);
+      final scheduledDate = _scheduledInstant(reminderDate);
+
+      if (scheduledDate.isAfter(_now())) {
+        // Encode the duration in the ID so different reminder windows don't collide
+        final notifId = '${taskId}_r${reminderBefore.inMinutes}'.hashCode;
+        await _notifications.zonedSchedule(
+          notifId,
+          'Task Reminder',
+          'Task "$taskTitle" is due ${_formatReminderTime(reminderBefore)}',
+          scheduledDate,
+          const NotificationDetails(
+            android: AndroidNotificationDetails(
+              _channelId,
+              _channelName,
+              channelDescription: _channelDescription,
+              importance: Importance.defaultImportance,
+              priority: Priority.defaultPriority,
+              icon: '@mipmap/ic_launcher',
+            ),
+            iOS: DarwinNotificationDetails(
+              presentAlert: true,
+              presentBadge: true,
+              presentSound: true,
+            ),
+          ),
+          payload: 'task_reminder:$taskId',
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+        );
+      }
+    } catch (e) {
+      debugPrint('Error scheduling reminder notification for "$taskTitle": $e');
+    }
+  }
+
+  /// Show an immediate notification when a task is completed.
+  Future<void> showTaskCompletedNotification({
+    required String taskTitle,
+  }) async {
+    try {
+      await _notifications.show(
+        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        'Task Completed! ✅',
+        'Great job! You completed "$taskTitle"',
         const NotificationDetails(
           android: AndroidNotificationDetails(
             _channelId,
@@ -218,51 +209,22 @@ class NotificationService {
             presentSound: true,
           ),
         ),
-        payload: 'task_reminder:$taskId',
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+        payload: 'task_completed',
       );
+    } catch (e) {
+      debugPrint('Error showing task completed notification: $e');
     }
   }
 
-  /// Show an immediate notification when a task is completed
-  Future<void> showTaskCompletedNotification({
-    required String taskTitle,
-  }) async {
-    await _notifications.show(
-      DateTime.now().millisecondsSinceEpoch ~/ 1000, // Use timestamp as ID
-      'Task Completed!',
-      'Great job! You completed "$taskTitle"',
-      const NotificationDetails(
-        android: AndroidNotificationDetails(
-          _channelId,
-          _channelName,
-          channelDescription: _channelDescription,
-          importance: Importance.defaultImportance,
-          priority: Priority.defaultPriority,
-          icon: '@mipmap/ic_launcher',
-        ),
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: true,
-        ),
-      ),
-      payload: 'task_completed',
-    );
-  }
-
-  /// Show an immediate deadline alert notification
+  /// Show an immediate deadline alert notification.
   Future<void> showImmediateDeadlineAlert({
     required String taskId,
     required String taskTitle,
     required bool isOverdue,
   }) async {
     try {
-      print('🔔 Showing immediate deadline alert for: $taskTitle (${isOverdue ? 'OVERDUE' : 'DUE NOW'})');
-
       await _notifications.show(
-        taskId.hashCode + (isOverdue ? 1000000 : 0), // Unique ID for deadline alerts
+        taskId.hashCode + (isOverdue ? 1000000 : 0),
         isOverdue ? 'Task Overdue! ⚠️' : 'Task Due Now! 🔔',
         'Task "$taskTitle" ${isOverdue ? 'is overdue' : 'is due now'}',
         NotificationDetails(
@@ -292,32 +254,31 @@ class NotificationService {
         ),
         payload: 'deadline_alert:$taskId',
       );
-
-      print('✅ Immediate deadline alert shown successfully');
-    } catch (e, stackTrace) {
-      print('❌ Error showing immediate deadline alert: $e');
-      print('📍 Stack trace: $stackTrace');
+    } catch (e) {
+      debugPrint('Error showing deadline alert for "$taskTitle": $e');
     }
   }
 
-  /// Cancel all notifications for a specific task
+  /// Cancel all notifications for a specific task.
   Future<void> cancelTaskNotifications(String taskId) async {
-    await _notifications.cancel(taskId.hashCode);
-    await _notifications.cancel('${taskId}_reminder'.hashCode);
+    await _notifications.cancel(taskId.hashCode);                   // due
+    await _notifications.cancel('${taskId}_r60'.hashCode);          // 1-hour reminder
+    await _notifications.cancel('${taskId}_r1440'.hashCode);        // 1-day reminder
+    await _notifications.cancel('${taskId}_reminder'.hashCode);     // legacy reminder ID
+    await _notifications.cancel(taskId.hashCode + 1000000);         // overdue deadline alert
+    await _notifications.cancel('${taskId}_snooze'.hashCode);       // snooze
   }
 
-  /// Cancel all notifications
+  /// Cancel all notifications.
   Future<void> cancelAllNotifications() async {
     await _notifications.cancelAll();
   }
 
-  /// Show a test notification
+  /// Show a test notification immediately.
   Future<void> showTestNotification() async {
     try {
-      print('🔔 Attempting to show test notification...');
-      
       await _notifications.show(
-        999999, // Test notification ID
+        999999,
         'Test Notification',
         'This is a test notification from your Todo app!',
         const NotificationDetails(
@@ -325,11 +286,11 @@ class NotificationService {
             _channelId,
             _channelName,
             channelDescription: _channelDescription,
-            importance: Importance.max, // Use max importance to ensure it shows
+            importance: Importance.max,
             priority: Priority.high,
             playSound: true,
             enableVibration: true,
-            ticker: 'ticker', // Ticker text for older Android versions
+            ticker: 'Test',
             icon: '@mipmap/ic_launcher',
           ),
           iOS: DarwinNotificationDetails(
@@ -340,34 +301,30 @@ class NotificationService {
         ),
         payload: 'test_notification',
       );
-      print('✅ Test notification sent successfully!');
-    } catch (e, stackTrace) {
-      print('❌ Error showing test notification: $e');
-      print('📍 Stack trace: $stackTrace');
+    } catch (e) {
+      debugPrint('Error showing test notification: $e');
     }
   }
 
-  /// Schedule a test notification for a few seconds from now
+  /// Schedule a test notification a few seconds from now.
   Future<void> scheduleTestNotification({int secondsFromNow = 5}) async {
-    final scheduledDate = tz.TZDateTime.now(tz.local).add(Duration(seconds: secondsFromNow));
-    
-    print('📅 Scheduling test notification for: $scheduledDate');
-    
-    await _notifications.zonedSchedule(
-      888888, // Test scheduled notification ID
-      'Scheduled Test',
-      'This scheduled notification worked! 🎉',
-      scheduledDate,
+    try {
+      final scheduledDate = _now().add(Duration(seconds: secondsFromNow));
+      await _notifications.zonedSchedule(
+        888888,
+        'Scheduled Test',
+        'This scheduled notification worked! 🎉',
+        scheduledDate,
         const NotificationDetails(
           android: AndroidNotificationDetails(
             _channelId,
             _channelName,
             channelDescription: _channelDescription,
-            importance: Importance.max, // Use max importance to ensure it shows
+            importance: Importance.max,
             priority: Priority.high,
             playSound: true,
             enableVibration: true,
-            ticker: 'ticker', // Ticker text for older Android versions
+            ticker: 'Test',
             icon: '@mipmap/ic_launcher',
           ),
           iOS: DarwinNotificationDetails(
@@ -376,11 +333,31 @@ class NotificationService {
             presentSound: true,
           ),
         ),
-      payload: 'test_scheduled',
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-    );
-    print('✅ Test notification scheduled for $secondsFromNow seconds from now');
+        payload: 'test_scheduled',
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+      );
+    } catch (e) {
+      debugPrint('Error scheduling test notification: $e');
+    }
+  }
+
+  /// Returns all currently pending notifications (useful for debugging).
+  Future<List<PendingNotificationRequest>> getPendingNotifications() async {
+    return _notifications.pendingNotificationRequests();
+  }
+
+  /// Prints a debug summary of pending notification state.
+  Future<void> debugNotificationStatus() async {
+    final pending = await getPendingNotifications();
+    debugPrint('=== Notification status ===');
+    debugPrint('Schedule zone: ${tz.UTC}  Now: ${_now()}');
+    debugPrint('Pending: ${pending.length}');
+    for (final n in pending) {
+      debugPrint('  id=${n.id}  title=${n.title}');
+    }
+    debugPrint('===========================');
   }
 
   String _formatReminderTime(Duration duration) {
@@ -393,25 +370,5 @@ class NotificationService {
     } else {
       return 'soon';
     }
-  }
-
-  /// Get all pending notifications (for debugging)
-  Future<List<PendingNotificationRequest>> getPendingNotifications() async {
-    final pending = await _notifications.pendingNotificationRequests();
-    print('📋 Pending notifications: ${pending.length}');
-    for (var notification in pending) {
-      print('  - ID: ${notification.id}, Title: ${notification.title}, Body: ${notification.body}');
-    }
-    return pending;
-  }
-
-  /// Debug method to print notification status
-  Future<void> debugNotificationStatus() async {
-    print('🔍 === NOTIFICATION DEBUG INFO ===');
-    final pending = await getPendingNotifications();
-    print('📅 Current timezone: ${tz.local}');
-    print('⏰ Current time: ${tz.TZDateTime.now(tz.local)}');
-    print('🔔 Total pending notifications: ${pending.length}');
-    print('===============================');
   }
 }

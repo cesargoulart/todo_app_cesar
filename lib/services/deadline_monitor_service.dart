@@ -17,93 +17,66 @@ class DeadlineMonitorService {
   // Track which tasks have already been alerted to avoid duplicate alerts
   final Set<String> _alertedTaskIds = {};
 
-  // Configuration
-  static const Duration _checkInterval = Duration(minutes: 1);
-  static const Duration _alertThreshold = Duration(seconds: 30); // Alert if within 30 seconds of due time
+  // Called when the user taps "Mark Done" in the deadline alert dialog.
+  // Set this from the screen so the dialog can actually toggle the task.
+  void Function(ToDoItem task)? onMarkDone;
 
-  /// Initialize the monitor with a context for showing dialogs
+  static const Duration _checkInterval = Duration(minutes: 1);
+  // Alert if within 30 seconds of due time
+  static const Duration _alertThreshold = Duration(seconds: 30);
+
   void initialize(BuildContext context) {
     _context = context;
-    print('📅 DeadlineMonitorService initialized');
   }
 
-  /// Update the context (call this when context changes)
   void updateContext(BuildContext context) {
     _context = context;
   }
 
-  /// Start monitoring tasks for deadlines
   void startMonitoring(List<ToDoItem> tasks) {
     _tasks = tasks;
-
-    // Cancel existing timer if any
     _monitorTimer?.cancel();
-
-    // Start periodic monitoring
-    _monitorTimer = Timer.periodic(_checkInterval, (timer) {
-      _checkDeadlines();
-    });
-
-    // Also check immediately
+    _monitorTimer = Timer.periodic(_checkInterval, (_) => _checkDeadlines());
     _checkDeadlines();
-
-    print('📅 Deadline monitoring started for ${tasks.length} tasks');
   }
 
-  /// Stop monitoring
   void stopMonitoring() {
     _monitorTimer?.cancel();
     _monitorTimer = null;
-    print('📅 Deadline monitoring stopped');
   }
 
-  /// Update the task list being monitored
   void updateTasks(List<ToDoItem> tasks) {
     _tasks = tasks;
   }
 
-  /// Check all tasks for deadlines
   void _checkDeadlines() {
     final now = DateTime.now();
 
     for (final task in _tasks) {
-      // Skip completed tasks or tasks without due dates
-      if (task.isDone || task.dueDate == null || task.id == null) {
-        continue;
-      }
+      if (task.isDone || task.dueDate == null || task.id == null) continue;
+      if (_alertedTaskIds.contains(task.id)) continue;
 
-      // Skip if already alerted
-      if (_alertedTaskIds.contains(task.id)) {
-        continue;
-      }
-
-      final dueDate = task.dueDate!;
-      final timeDifference = dueDate.difference(now);
-
-      // Check if task is due (within threshold or overdue)
+      final timeDifference = task.dueDate!.difference(now);
       if (timeDifference.isNegative || timeDifference <= _alertThreshold) {
         _handleDeadlineReached(task, timeDifference.isNegative);
       }
     }
   }
 
-  /// Handle when a deadline is reached
   void _handleDeadlineReached(ToDoItem task, bool isOverdue) {
-    print('🔔 Deadline reached for task: ${task.title} (${isOverdue ? 'OVERDUE' : 'DUE NOW'})');
-
-    // Mark as alerted
     _alertedTaskIds.add(task.id!);
 
-    // Show in-app alert if context is available
     if (_context != null && _context!.mounted) {
       _showInAppAlert(task, isOverdue);
     }
 
-    // Also show system notification as backup
-    _showSystemNotification(task, isOverdue);
+    _notificationService.showImmediateDeadlineAlert(
+      taskId: task.id!,
+      taskTitle: task.title,
+      isOverdue: isOverdue,
+    );
   }
 
-  /// Show an in-app alert dialog
   void _showInAppAlert(ToDoItem task, bool isOverdue) {
     if (_context == null || !_context!.mounted) return;
 
@@ -137,10 +110,7 @@ class DeadlineMonitorService {
             children: [
               Text(
                 task.title,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
               Row(
@@ -159,11 +129,8 @@ class DeadlineMonitorService {
                   spacing: 4,
                   children: task.labels.map((label) {
                     return Chip(
-                      label: Text(
-                        label.name,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      backgroundColor: _parseColor(label.color).withOpacity(0.2),
+                      label: Text(label.name, style: const TextStyle(fontSize: 12)),
+                      backgroundColor: _parseColor(label.color).withValues(alpha: 0.2),
                       padding: const EdgeInsets.all(0),
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     );
@@ -177,23 +144,21 @@ class DeadlineMonitorService {
               icon: const Icon(Icons.snooze),
               label: const Text('Snooze 10m'),
               onPressed: () {
-                _snoozeTask(task, const Duration(minutes: 10));
                 Navigator.of(dialogContext).pop();
+                _snoozeTask(task, const Duration(minutes: 10));
               },
             ),
             TextButton.icon(
               icon: const Icon(Icons.check_circle_outline),
               label: const Text('Mark Done'),
               onPressed: () {
-                _markTaskDone(task);
                 Navigator.of(dialogContext).pop();
+                _markTaskDone(task);
               },
             ),
             ElevatedButton(
               child: const Text('OK'),
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-              },
+              onPressed: () => Navigator.of(dialogContext).pop(),
             ),
           ],
         );
@@ -201,23 +166,10 @@ class DeadlineMonitorService {
     );
   }
 
-  /// Show system notification
-  void _showSystemNotification(ToDoItem task, bool isOverdue) {
-    _notificationService.showImmediateDeadlineAlert(
-      taskId: task.id!,
-      taskTitle: task.title,
-      isOverdue: isOverdue,
-    );
-  }
-
-  /// Snooze a task (reschedule alert)
   void _snoozeTask(ToDoItem task, Duration snoozeDuration) {
-    print('😴 Snoozing task: ${task.title} for ${snoozeDuration.inMinutes} minutes');
-
-    // Remove from alerted set so it can alert again
+    // Remove from alerted set so it can alert again after the snooze
     _alertedTaskIds.remove(task.id!);
 
-    // Schedule a notification for after the snooze duration
     final snoozeTime = DateTime.now().add(snoozeDuration);
     _notificationService.scheduleTaskDueNotification(
       taskId: '${task.id}_snooze',
@@ -235,13 +187,11 @@ class DeadlineMonitorService {
     }
   }
 
-  /// Mark task as done (callback for the alert dialog)
   void _markTaskDone(ToDoItem task) {
-    print('✅ Marking task as done from alert: ${task.title}');
-
-    // This will be handled by the calling screen
-    // We just trigger a notification that the user wants to mark it done
-    if (_context != null && _context!.mounted) {
+    if (onMarkDone != null) {
+      onMarkDone!(task);
+    } else if (_context != null && _context!.mounted) {
+      // Fallback if no callback was registered
       ScaffoldMessenger.of(_context!).showSnackBar(
         SnackBar(
           content: Text('Please mark "${task.title}" as complete in the task list'),
@@ -251,17 +201,14 @@ class DeadlineMonitorService {
     }
   }
 
-  /// Clear alert status for a task (call this when task is completed or deleted)
   void clearTaskAlert(String taskId) {
     _alertedTaskIds.remove(taskId);
   }
 
-  /// Clear all alert statuses
   void clearAllAlerts() {
     _alertedTaskIds.clear();
   }
 
-  /// Format due date for display
   String _formatDueDate(DateTime date) {
     final now = DateTime.now();
     final difference = date.difference(now);
@@ -280,14 +227,12 @@ class DeadlineMonitorService {
     }
   }
 
-  /// Format date and time
   String _formatDateTime(DateTime date) {
     final hour = date.hour.toString().padLeft(2, '0');
     final minute = date.minute.toString().padLeft(2, '0');
     return '${date.day}/${date.month}/${date.year} at $hour:$minute';
   }
 
-  /// Parse color from string
   Color _parseColor(String colorString) {
     try {
       return Color(int.parse(colorString.replaceFirst('#', '0xFF')));
@@ -296,7 +241,6 @@ class DeadlineMonitorService {
     }
   }
 
-  /// Dispose the service
   void dispose() {
     stopMonitoring();
     _context = null;
