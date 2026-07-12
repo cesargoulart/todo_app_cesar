@@ -3,6 +3,8 @@
 // Ecrã principal redesenhado com o novo visual moderno escuro.
 // Toda a lógica de negócio é preservada — apenas a UI foi renovada.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/todo_item.dart';
 import '../models/label.dart';
+import '../config/sync_config.dart';
 import '../services/supabase_service.dart';
 import '../services/label_service.dart';
 import '../services/notification_service.dart';
@@ -35,6 +38,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
     with SingleTickerProviderStateMixin {
   // ── Services ────────────────────────────────────────────────────────────────
   final TextEditingController _textFieldController = TextEditingController();
+  final TextEditingController _notesFieldController = TextEditingController();
   final SupabaseService _supabaseService = SupabaseService();
   final LabelService _labelService = LabelService();
   final NotificationService _notificationService = NotificationService();
@@ -61,6 +65,32 @@ class _ToDoListScreenState extends State<ToDoListScreen>
 
   bool get _isNotasView =>
       _filterByLabel?.name.toLowerCase() == 'notas';
+
+  bool _hasBirthdayLabel(List<Label> labels) {
+    return labels.any((label) {
+      final name = _normalizeLabelName(label.name);
+      return name == 'aniversario' || name == 'aniversarios';
+    });
+  }
+
+  String _normalizeLabelName(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll('\u00e1', 'a')
+        .replaceAll('\u00e0', 'a')
+        .replaceAll('\u00e2', 'a')
+        .replaceAll('\u00e3', 'a')
+        .replaceAll('\u00e9', 'e')
+        .replaceAll('\u00ea', 'e')
+        .replaceAll('\u00ed', 'i')
+        .replaceAll('\u00f3', 'o')
+        .replaceAll('\u00f4', 'o')
+        .replaceAll('\u00f5', 'o')
+        .replaceAll('\u00fa', 'u')
+        .replaceAll('\u00fc', 'u')
+        .replaceAll('\u00e7', 'c');
+  }
 
   List<ToDoItem> get _filteredTodos {
     // Only show top-level tasks; subtasks live inside their parent's card
@@ -240,6 +270,59 @@ class _ToDoListScreenState extends State<ToDoListScreen>
     super.didChangeDependencies();
     _deadlineMonitor.initialize(context);
     _deadlineMonitor.onMarkDone = (task) => _toggleToDoStatus(task);
+
+    // Action buttons on the system due/overdue notification.
+    _notificationService.onTaskDone = (taskId) {
+      final task = _findTaskById(taskId);
+      if (task != null && !task.isDone) _toggleToDoStatus(task);
+    };
+    _notificationService.onTaskSnoozed = (taskId) {
+      final task = _findTaskById(taskId);
+      if (task != null) _snoozeTask(task);
+    };
+  }
+
+  // Push the task's due date to now + 10 minutes, persist it and reschedule
+  // its notification. Triggered by the "Snooze" notification action button.
+  Future<void> _snoozeTask(ToDoItem task) async {
+    if (task.id == null || !_isServiceReady()) return;
+    final newDue = DateTime.now().add(const Duration(minutes: 10));
+    final previousDue = task.dueDate;
+    setState(() => task.dueDate = newDue);
+    try {
+      await _notificationService.cancelTaskNotifications(task.id!);
+      await _notificationService.scheduleTaskDueNotification(
+        taskId: task.id!,
+        taskTitle: task.title,
+        dueDate: newDue,
+      );
+      await _syncService.saveTodoSafely(task);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Snoozed "${task.title}" for 10 minutes'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() => task.dueDate = previousDue);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error snoozing task: $e')),
+        );
+      }
+    }
+  }
+
+  ToDoItem? _findTaskById(String taskId) {
+    for (final task in _todos) {
+      if (task.id == taskId) return task;
+      for (final sub in task.subtasks) {
+        if (sub.id == taskId) return sub;
+      }
+    }
+    return null;
   }
 
   @override
@@ -248,6 +331,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
     _deadlineMonitor.dispose();
     _syncService.dispose();
     _textFieldController.dispose();
+    _notesFieldController.dispose();
     super.dispose();
   }
 
@@ -278,6 +362,9 @@ class _ToDoListScreenState extends State<ToDoListScreen>
             _todos = todos;
             _isLoading = false;
           });
+          unawaited(
+            _notificationService.rescheduleNotificationsForTasks(_todos),
+          );
           _deadlineMonitor.updateTasks(_todos);
           _deadlineMonitor.startMonitoring(_todos);
         }
@@ -456,7 +543,10 @@ class _ToDoListScreenState extends State<ToDoListScreen>
   }) {
     final bool isEditing = existingTodo != null;
     _textFieldController.text = existingTodo?.title ?? '';
-    DateTime? selectedDueDate = existingTodo?.dueDate;
+    _notesFieldController.text = existingTodo?.notes ?? '';
+    DateTime? selectedDueDate =
+        existingTodo?.dueDate ??
+        (isEditing ? null : DateTime.now().add(const Duration(hours: 1)));
     bool showOnlyOnDueDate = existingTodo?.showOnlyOnDueDate ?? false;
     bool isRecurring = existingTodo?.isRecurring ?? false;
     RecurrenceInterval recurrenceInterval =
@@ -494,6 +584,47 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                           style: const TextStyle(color: AppColors.textPrimary),
                           decoration: InputDecoration(
                             hintText: 'Task title…',
+                            hintStyle: const TextStyle(
+                              color: AppColors.textMuted,
+                            ),
+                            filled: true,
+                            fillColor: AppColors.overlay08,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(
+                                AppRadius.button,
+                              ),
+                              borderSide: const BorderSide(
+                                color: AppColors.borderCard,
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(
+                                AppRadius.button,
+                              ),
+                              borderSide: const BorderSide(
+                                color: AppColors.borderCard,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(
+                                AppRadius.button,
+                              ),
+                              borderSide: const BorderSide(
+                                color: AppColors.accentPurple,
+                                width: 1.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        // Notes field
+                        TextField(
+                          controller: _notesFieldController,
+                          minLines: 2,
+                          maxLines: 5,
+                          style: const TextStyle(color: AppColors.textPrimary),
+                          decoration: InputDecoration(
+                            hintText: 'Notes…',
                             hintStyle: const TextStyle(
                               color: AppColors.textMuted,
                             ),
@@ -742,7 +873,21 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                         LabelPickerWidget(
                           selectedLabels: selectedLabels,
                           onLabelsChanged:
-                              (labels) => setDs(() => selectedLabels = labels),
+                              (labels) => setDs(() {
+                                final hadBirthdayLabel = _hasBirthdayLabel(
+                                  selectedLabels,
+                                );
+                                selectedLabels = labels;
+
+                                if (!isSubtask &&
+                                    !hadBirthdayLabel &&
+                                    _hasBirthdayLabel(labels)) {
+                                  isRecurring = true;
+                                  recurrenceInterval =
+                                      RecurrenceInterval.yearly;
+                                  selectedDueDate ??= DateTime.now();
+                                }
+                              }),
                         ),
                         // Actions
                         const SizedBox(height: 24),
@@ -758,6 +903,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                               ),
                               onPressed: () {
                                 _textFieldController.clear();
+                                _notesFieldController.clear();
                                 Navigator.of(context).pop();
                               },
                             ),
@@ -784,6 +930,13 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                     try {
                                       if (isEditing) {
                                         existingTodo.title = newTitle;
+                                        existingTodo.notes =
+                                            _notesFieldController.text
+                                                    .trim()
+                                                    .isEmpty
+                                                ? null
+                                                : _notesFieldController.text
+                                                    .trim();
                                         existingTodo.dueDate = selectedDueDate;
                                         existingTodo.showOnlyOnDueDate =
                                             showOnlyOnDueDate;
@@ -831,6 +984,13 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                       } else {
                                         final newTodo = ToDoItem(
                                           title: newTitle,
+                                          notes:
+                                              _notesFieldController.text
+                                                      .trim()
+                                                      .isEmpty
+                                                  ? null
+                                                  : _notesFieldController.text
+                                                      .trim(),
                                           dueDate: selectedDueDate,
                                           showOnlyOnDueDate: showOnlyOnDueDate,
                                           isRecurring: isRecurring,
@@ -884,6 +1044,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                     }
                                   }
                                   _textFieldController.clear();
+                                  _notesFieldController.clear();
                                   if (context.mounted)
                                     Navigator.of(context).pop();
                                 },
@@ -1036,6 +1197,50 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                       Text(
                         'Tasks: ${s['currentTodosCount']}',
                         style: const TextStyle(color: AppColors.textSecondary),
+                      ),
+                      FutureBuilder<NotificationDebugStatus>(
+                        future: _notificationService.getDebugStatus(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState ==
+                              ConnectionState.waiting) {
+                            return const Text(
+                              'Notifications: loading...',
+                              style: TextStyle(color: AppColors.textSecondary),
+                            );
+                          }
+                          final status = snapshot.data;
+                          if (snapshot.hasError || status == null) {
+                            return Text(
+                              'Notifications: error (${snapshot.error})',
+                              style: const TextStyle(
+                                color: AppColors.accentRed,
+                              ),
+                            );
+                          }
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Pending notifications: ${status.pendingCount}',
+                                style: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                              Text(
+                                'Android notifications: ${status.notificationsText}',
+                                style: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                              Text(
+                                'Exact alarms: ${status.exactAlarmsText}',
+                                style: const TextStyle(
+                                  color: AppColors.textSecondary,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                       const Divider(color: AppColors.borderSubtle),
                       ListTile(
@@ -1384,6 +1589,13 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                   onTap: () => setState(() => _showCompleted = !_showCompleted),
                 ),
                 const SizedBox(width: 8),
+                if (SyncConfig.showDebugMenu) ...[
+                  _IconAction(
+                    icon: Icons.bug_report_outlined,
+                    onTap: _showDebugDialog,
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 _IconAction(
                   icon: Icons.sync_rounded,
                   loading: _isSyncing,

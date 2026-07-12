@@ -49,6 +49,7 @@ class ToDoItem {
   String? id;
   String title;
   String? body; // Note text body (used in Notas view)
+  String? notes; // Free-form notes attached to a task
   bool isDone;
   DateTime? dueDate;
   bool showOnlyOnDueDate; // New field: if true, task only appears on/after due date
@@ -67,6 +68,7 @@ class ToDoItem {
     this.id,
     required this.title,
     this.body,
+    this.notes,
     this.isDone = false,
     this.dueDate,
     this.showOnlyOnDueDate = false,
@@ -87,6 +89,7 @@ class ToDoItem {
     final Map<String, dynamic> data = {
       'title': title,
       'body': body,
+      'notes': notes,
       'is_done': isDone,
       'due_date': dueDate?.toIso8601String(),
       'show_only_on_due_date': showOnlyOnDueDate,
@@ -122,6 +125,7 @@ class ToDoItem {
       id: json['id'],
       title: json['title'],
       body: json['body'],
+      notes: json['notes'],
       isDone: json['is_done'] ?? false,
       dueDate: json['due_date'] != null ? DateTime.parse(json['due_date']) : null,
       showOnlyOnDueDate: json['show_only_on_due_date'] ?? false,

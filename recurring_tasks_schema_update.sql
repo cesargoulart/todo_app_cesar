@@ -1,5 +1,6 @@
 -- SQL commands to add recurring task support to the todo_cesar table
 -- Run these commands in the Supabase SQL Editor
+-- Requires label support from labels_schema_update.sql for recurring instances to copy labels
 
 -- Add columns for recurring tasks
 ALTER TABLE todo_cesar ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE;
@@ -14,8 +15,19 @@ CREATE INDEX IF NOT EXISTS idx_todo_cesar_next_occurrence ON todo_cesar(next_occ
 CREATE INDEX IF NOT EXISTS idx_todo_cesar_original_recurring_task_id ON todo_cesar(original_recurring_task_id);
 
 -- Add a foreign key constraint for original_recurring_task_id
-ALTER TABLE todo_cesar ADD CONSTRAINT fk_original_recurring_task 
-    FOREIGN KEY (original_recurring_task_id) REFERENCES todo_cesar(id) ON DELETE CASCADE;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_original_recurring_task'
+        AND conrelid = 'todo_cesar'::regclass
+    ) THEN
+        ALTER TABLE todo_cesar ADD CONSTRAINT fk_original_recurring_task
+            FOREIGN KEY (original_recurring_task_id) REFERENCES todo_cesar(id) ON DELETE CASCADE;
+    END IF;
+END;
+$$;
 
 -- Function to calculate next occurrence date based on recurrence interval
 CREATE OR REPLACE FUNCTION calculate_next_occurrence(
@@ -38,12 +50,22 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Function to automatically update next_occurrence_date when a recurring task is created or updated
+-- Function to automatically update next_occurrence_date when recurrence settings change.
+-- Important: updates that only advance next_occurrence_date must keep their explicit value.
 CREATE OR REPLACE FUNCTION update_next_occurrence()
 RETURNS TRIGGER AS $$
 BEGIN
     IF NEW.is_recurring = true AND NEW.recurrence_interval IS NOT NULL AND NEW.due_date IS NOT NULL THEN
-        NEW.next_occurrence_date = calculate_next_occurrence(NEW.due_date, NEW.recurrence_interval);
+        IF TG_OP = 'INSERT' THEN
+            NEW.next_occurrence_date = COALESCE(
+                NEW.next_occurrence_date,
+                calculate_next_occurrence(NEW.due_date, NEW.recurrence_interval)
+            );
+        ELSIF NEW.is_recurring IS DISTINCT FROM OLD.is_recurring
+            OR NEW.recurrence_interval IS DISTINCT FROM OLD.recurrence_interval
+            OR NEW.due_date IS DISTINCT FROM OLD.due_date THEN
+            NEW.next_occurrence_date = calculate_next_occurrence(NEW.due_date, NEW.recurrence_interval);
+        END IF;
     ELSE
         NEW.next_occurrence_date = NULL;
     END IF;
@@ -68,38 +90,65 @@ RETURNS TABLE(
 DECLARE
     recurring_task RECORD;
     new_task_uuid UUID;
+    existing_task_uuid UUID;
 BEGIN
-    -- Find all recurring tasks that need new instances
+    -- Find all recurring tasks that need new instances within the next 7 days
     FOR recurring_task IN 
         SELECT * FROM todo_cesar 
         WHERE is_recurring = true 
         AND next_occurrence_date IS NOT NULL 
-        AND next_occurrence_date <= NOW()
+        AND next_occurrence_date <= NOW() + INTERVAL '7 days'
         AND (recurrence_end_date IS NULL OR next_occurrence_date <= recurrence_end_date)
     LOOP
-        -- Generate a new UUID for the new task instance
-        new_task_uuid := gen_random_uuid();
-        
-        -- Create a new task instance
-        INSERT INTO todo_cesar (
-            id,
-            title,
-            is_done,
-            due_date,
-            parent_id,
-            subtasks,
-            is_recurring,
-            original_recurring_task_id
-        ) VALUES (
-            new_task_uuid,
-            recurring_task.title,
-            false, -- New instances start as not done
-            recurring_task.next_occurrence_date,
-            recurring_task.parent_id,
-            recurring_task.subtasks,
-            false, -- Instances are not recurring themselves
-            recurring_task.id
-        );
+        existing_task_uuid := NULL;
+
+        SELECT id INTO existing_task_uuid
+        FROM todo_cesar
+        WHERE original_recurring_task_id = recurring_task.id
+        AND due_date = recurring_task.next_occurrence_date
+        LIMIT 1;
+
+        IF existing_task_uuid IS NULL THEN
+            -- Generate a new UUID for the new task instance
+            new_task_uuid := gen_random_uuid();
+
+            -- Create a new task instance
+            INSERT INTO todo_cesar (
+                id,
+                title,
+                is_done,
+                due_date,
+                parent_id,
+                subtasks,
+                is_recurring,
+                original_recurring_task_id
+            ) VALUES (
+                new_task_uuid,
+                recurring_task.title,
+                false, -- New instances start as not done
+                recurring_task.next_occurrence_date,
+                recurring_task.parent_id,
+                recurring_task.subtasks,
+                false, -- Instances are not recurring themselves
+                recurring_task.id
+            );
+
+            -- Copy labels from the recurring task to the new instance
+            INSERT INTO todo_task_labels (task_id, label_id)
+            SELECT new_task_uuid, label_id
+            FROM todo_task_labels
+            WHERE task_id = recurring_task.id
+            ON CONFLICT (task_id, label_id) DO NOTHING;
+        ELSE
+            -- A matching instance already exists; keep labels in sync and avoid duplicates
+            new_task_uuid := existing_task_uuid;
+
+            INSERT INTO todo_task_labels (task_id, label_id)
+            SELECT existing_task_uuid, label_id
+            FROM todo_task_labels
+            WHERE task_id = recurring_task.id
+            ON CONFLICT (task_id, label_id) DO NOTHING;
+        END IF;
         
         -- Update the original recurring task's next occurrence date
         UPDATE todo_cesar 
@@ -117,6 +166,15 @@ BEGIN
     END LOOP;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Backfill labels for recurring instances that were created before label copying existed
+INSERT INTO todo_task_labels (task_id, label_id)
+SELECT instance.id, original_label.label_id
+FROM todo_cesar instance
+JOIN todo_task_labels original_label
+    ON original_label.task_id = instance.original_recurring_task_id
+WHERE instance.original_recurring_task_id IS NOT NULL
+ON CONFLICT (task_id, label_id) DO NOTHING;
 
 -- Create a view to easily see all recurring task instances
 CREATE OR REPLACE VIEW recurring_task_instances AS

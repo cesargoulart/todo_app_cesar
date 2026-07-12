@@ -367,13 +367,15 @@ class _TodoTaskCardWidgetState extends State<TodoTaskCardWidget>
                                 ),
                                 const SizedBox(width: 3),
                                 Text(
-                                  DateFormat('HH:mm')
+                                  DateFormat('dd/MM HH:mm')
                                       .format(widget.todo.dueDate!),
                                   style: AppTextStyles.timeText
                                       .copyWith(
                                     color: _isOverdue
                                         ? AppColors.accentRed
                                         : AppColors.textMuted,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 ),
                               ],

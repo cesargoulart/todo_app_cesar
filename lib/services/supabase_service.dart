@@ -376,11 +376,7 @@ class SupabaseService {
   Future<void> rescheduleAllNotifications() async {
     try {
       final todos = await loadTodos();
-      for (ToDoItem todo in todos) {
-        if (todo.id != null && todo.dueDate != null && !todo.isDone) {
-          await _scheduleNotificationsForTask(todo);
-        }
-      }
+      await _notificationService.rescheduleNotificationsForTasks(todos);
     } catch (e) {
       print('Error rescheduling notifications: $e');
     }

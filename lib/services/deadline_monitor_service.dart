@@ -1,250 +1,101 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
+
 import '../models/todo_item.dart';
 import 'notification_service.dart';
 
+/// On Android/iOS/macOS/Linux, due/overdue alerts are handled entirely by the
+/// scheduled system notification (with Snooze/Done action buttons), which
+/// fires on time even when the app is closed.
+///
+/// flutter_local_notifications has no Windows implementation, so there is no
+/// OS-level scheduling available there. This service fills that gap on
+/// Windows only: it polls the in-memory task list on a timer and fires a
+/// native toast (via NotificationService, backed by local_notifier) the
+/// moment a task's due date is reached. This only works while the app
+/// process is running — Windows has no background alarm mechanism here.
 class DeadlineMonitorService {
-  static final DeadlineMonitorService _instance = DeadlineMonitorService._internal();
+  static final DeadlineMonitorService _instance =
+      DeadlineMonitorService._internal();
   factory DeadlineMonitorService() => _instance;
   DeadlineMonitorService._internal();
 
   final NotificationService _notificationService = NotificationService();
 
-  Timer? _monitorTimer;
-  List<ToDoItem> _tasks = [];
-  BuildContext? _context;
-
-  // Track which tasks have already been alerted to avoid duplicate alerts
-  final Set<String> _alertedTaskIds = {};
-
-  // Called when the user taps "Mark Done" in the deadline alert dialog.
-  // Set this from the screen so the dialog can actually toggle the task.
+  // Retained for API compatibility; no longer invoked.
   void Function(ToDoItem task)? onMarkDone;
 
-  static const Duration _checkInterval = Duration(minutes: 1);
-  // Alert if within 30 seconds of due time
-  static const Duration _alertThreshold = Duration(seconds: 30);
+  static const Duration _pollInterval = Duration(seconds: 20);
+  static const Duration _overdueThreshold = Duration(minutes: 1);
 
-  void initialize(BuildContext context) {
-    _context = context;
-  }
+  Timer? _timer;
+  List<ToDoItem> _tasks = [];
+  // Tracks the due date already alerted for each task, so editing a task to a
+  // new future due date automatically re-arms the alert without extra hooks.
+  final Map<String, DateTime> _alertedDueDates = {};
 
-  void updateContext(BuildContext context) {
-    _context = context;
-  }
+  bool get _isActive =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+  void initialize(BuildContext context) {}
+
+  void updateContext(BuildContext context) {}
 
   void startMonitoring(List<ToDoItem> tasks) {
+    if (!_isActive) return;
     _tasks = tasks;
-    _monitorTimer?.cancel();
-    _monitorTimer = Timer.periodic(_checkInterval, (_) => _checkDeadlines());
     _checkDeadlines();
+    _timer ??= Timer.periodic(_pollInterval, (_) => _checkDeadlines());
   }
 
   void stopMonitoring() {
-    _monitorTimer?.cancel();
-    _monitorTimer = null;
+    _timer?.cancel();
+    _timer = null;
   }
 
   void updateTasks(List<ToDoItem> tasks) {
     _tasks = tasks;
-  }
-
-  void _checkDeadlines() {
-    final now = DateTime.now();
-
-    for (final task in _tasks) {
-      if (task.isDone || task.dueDate == null || task.id == null) continue;
-      if (_alertedTaskIds.contains(task.id)) continue;
-
-      final timeDifference = task.dueDate!.difference(now);
-      if (timeDifference.isNegative || timeDifference <= _alertThreshold) {
-        _handleDeadlineReached(task, timeDifference.isNegative);
-      }
-    }
-  }
-
-  void _handleDeadlineReached(ToDoItem task, bool isOverdue) {
-    _alertedTaskIds.add(task.id!);
-
-    if (_context != null && _context!.mounted) {
-      _showInAppAlert(task, isOverdue);
-    }
-
-    _notificationService.showImmediateDeadlineAlert(
-      taskId: task.id!,
-      taskTitle: task.title,
-      isOverdue: isOverdue,
-    );
-  }
-
-  void _showInAppAlert(ToDoItem task, bool isOverdue) {
-    if (_context == null || !_context!.mounted) return;
-
-    showDialog(
-      context: _context!,
-      barrierDismissible: false,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: Row(
-            children: [
-              Icon(
-                isOverdue ? Icons.warning_amber_rounded : Icons.alarm,
-                color: isOverdue ? Colors.red : Colors.orange,
-                size: 28,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  isOverdue ? 'Task Overdue!' : 'Task Due Now!',
-                  style: TextStyle(
-                    color: isOverdue ? Colors.red : Colors.orange,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                task.title,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  const Icon(Icons.calendar_today, size: 16, color: Colors.grey),
-                  const SizedBox(width: 8),
-                  Text(
-                    _formatDueDate(task.dueDate!),
-                    style: const TextStyle(color: Colors.grey),
-                  ),
-                ],
-              ),
-              if (task.labels.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 4,
-                  children: task.labels.map((label) {
-                    return Chip(
-                      label: Text(label.name, style: const TextStyle(fontSize: 12)),
-                      backgroundColor: _parseColor(label.color).withValues(alpha: 0.2),
-                      padding: const EdgeInsets.all(0),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    );
-                  }).toList(),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton.icon(
-              icon: const Icon(Icons.snooze),
-              label: const Text('Snooze 10m'),
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-                _snoozeTask(task, const Duration(minutes: 10));
-              },
-            ),
-            TextButton.icon(
-              icon: const Icon(Icons.check_circle_outline),
-              label: const Text('Mark Done'),
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-                _markTaskDone(task);
-              },
-            ),
-            ElevatedButton(
-              child: const Text('OK'),
-              onPressed: () => Navigator.of(dialogContext).pop(),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _snoozeTask(ToDoItem task, Duration snoozeDuration) {
-    // Remove from alerted set so it can alert again after the snooze
-    _alertedTaskIds.remove(task.id!);
-
-    final snoozeTime = DateTime.now().add(snoozeDuration);
-    _notificationService.scheduleTaskDueNotification(
-      taskId: '${task.id}_snooze',
-      taskTitle: task.title,
-      dueDate: snoozeTime,
-    );
-
-    if (_context != null && _context!.mounted) {
-      ScaffoldMessenger.of(_context!).showSnackBar(
-        SnackBar(
-          content: Text('Snoozed "${task.title}" for ${snoozeDuration.inMinutes} minutes'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
-  }
-
-  void _markTaskDone(ToDoItem task) {
-    if (onMarkDone != null) {
-      onMarkDone!(task);
-    } else if (_context != null && _context!.mounted) {
-      // Fallback if no callback was registered
-      ScaffoldMessenger.of(_context!).showSnackBar(
-        SnackBar(
-          content: Text('Please mark "${task.title}" as complete in the task list'),
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
+    if (_isActive) _checkDeadlines();
   }
 
   void clearTaskAlert(String taskId) {
-    _alertedTaskIds.remove(taskId);
+    _alertedDueDates.remove(taskId);
   }
 
   void clearAllAlerts() {
-    _alertedTaskIds.clear();
-  }
-
-  String _formatDueDate(DateTime date) {
-    final now = DateTime.now();
-    final difference = date.difference(now);
-
-    if (difference.isNegative) {
-      final absDiff = difference.abs();
-      if (absDiff.inMinutes < 60) {
-        return '${absDiff.inMinutes} minutes ago';
-      } else if (absDiff.inHours < 24) {
-        return '${absDiff.inHours} hours ago';
-      } else {
-        return '${absDiff.inDays} days ago';
-      }
-    } else {
-      return 'Due ${_formatDateTime(date)}';
-    }
-  }
-
-  String _formatDateTime(DateTime date) {
-    final hour = date.hour.toString().padLeft(2, '0');
-    final minute = date.minute.toString().padLeft(2, '0');
-    return '${date.day}/${date.month}/${date.year} at $hour:$minute';
-  }
-
-  Color _parseColor(String colorString) {
-    try {
-      return Color(int.parse(colorString.replaceFirst('#', '0xFF')));
-    } catch (e) {
-      return Colors.blue;
-    }
+    _alertedDueDates.clear();
   }
 
   void dispose() {
     stopMonitoring();
-    _context = null;
-    _tasks.clear();
-    _alertedTaskIds.clear();
+  }
+
+  void _checkDeadlines() {
+    final now = DateTime.now();
+    for (final task in _flattenTasks(_tasks)) {
+      final taskId = task.id;
+      final dueDate = task.dueDate;
+      if (taskId == null || task.isDone || dueDate == null) continue;
+      if (dueDate.isAfter(now)) continue;
+      if (_alertedDueDates[taskId] == dueDate) continue;
+
+      _alertedDueDates[taskId] = dueDate;
+      _notificationService.showImmediateDeadlineAlert(
+        taskId: taskId,
+        taskTitle: task.title,
+        isOverdue: now.isAfter(dueDate.add(_overdueThreshold)),
+      );
+    }
+  }
+
+  Iterable<ToDoItem> _flattenTasks(List<ToDoItem> tasks) sync* {
+    for (final task in tasks) {
+      yield task;
+      if (task.subtasks.isNotEmpty) {
+        yield* _flattenTasks(task.subtasks);
+      }
+    }
   }
 }

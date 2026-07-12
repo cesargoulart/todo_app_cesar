@@ -4,7 +4,11 @@
       "Bash(flutter analyze:*)",
       "Bash(flutter run:*)",
       "Bash(timeout:*)",
-      "Bash(flutter:*)"
+      "Bash(flutter:*)",
+      "Bash(flutter analyze *)",
+      "mcp__claude_ai_Supabase__list_projects",
+      "mcp__claude_ai_Supabase__list_tables",
+      "mcp__claude_ai_Supabase__apply_migration"
     ],
     "deny": [],
     "ask": []
