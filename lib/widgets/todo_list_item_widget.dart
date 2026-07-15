@@ -69,6 +69,19 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> with SingleTick
     }
   }
 
+  // Human-readable description of a task's recurrence for the subtitle.
+  String _recurrenceLabel(ToDoItem todo) {
+    if (todo.recurrenceInterval == RecurrenceInterval.weekdays &&
+        todo.selectedWeekdays.isNotEmpty) {
+      const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      final days = ([...todo.selectedWeekdays]..sort())
+          .map((d) => names[(d - 1) % 7])
+          .join(', ');
+      return 'Repeats: $days';
+    }
+    return 'Repeats ${todo.recurrenceInterval.displayName}';
+  }
+
   @override
   Widget build(BuildContext context) {
     final todo = widget.todo;
@@ -269,7 +282,7 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> with SingleTick
                       // Show recurring information
                       if (todo.isRecurring)
                         Text(
-                          'Repeats ${todo.recurrenceInterval.displayName.toLowerCase()}${todo.recurrenceEndDate != null ? ' until ${DateFormat('MMM d, yyyy').format(todo.recurrenceEndDate!)}' : ''}',
+                          _recurrenceLabel(todo),
                           style: TextStyle(
                             fontSize: 11,
                             color: Theme.of(context).primaryColor,

@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import '../models/label.dart';
 import '../services/label_service.dart';
+import '../theme/app_theme.dart';
 
 class LabelPickerWidget extends StatefulWidget {
   final List<Label> selectedLabels;
@@ -23,6 +24,7 @@ class _LabelPickerWidgetState extends State<LabelPickerWidget> {
   List<Label> _allLabels = [];
   List<Label> _selectedLabels = [];
   bool _isLoading = true;
+  bool _isExpanded = false;
 
   @override
   void initState() {
@@ -174,9 +176,58 @@ class _LabelPickerWidgetState extends State<LabelPickerWidget> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
-              'Labels',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            Expanded(
+              child: InkWell(
+                onTap: () {
+                  setState(() {
+                    _isExpanded = !_isExpanded;
+                  });
+                },
+                borderRadius: BorderRadius.circular(4),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      const Text(
+                        'Labels',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (_selectedLabels.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.accentPurple,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '${_selectedLabels.length}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(width: 4),
+                      Icon(
+                        _isExpanded
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                        size: 20,
+                        color: AppColors.textSecondary,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
             TextButton.icon(
               onPressed: _showCreateLabelDialog,
@@ -185,33 +236,35 @@ class _LabelPickerWidgetState extends State<LabelPickerWidget> {
             ),
           ],
         ),
-        const SizedBox(height: 8),
-        if (_allLabels.isEmpty)
-          const Text('No labels available. Create your first label!')
-        else
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children:
-                _allLabels.map((label) {
-                  final isSelected = _selectedLabels.any(
-                    (l) => l.id == label.id,
-                  );
-                  return FilterChip(
-                    label: Text(label.name),
-                    selected: isSelected,
-                    onSelected: (_) => _toggleLabel(label),
-                    backgroundColor: _parseColor(label.color).withValues(alpha: 0.2),
-                    selectedColor: _parseColor(label.color).withValues(alpha: 0.6),
-                    checkmarkColor: Colors.white,
-                    labelStyle: TextStyle(
-                      color: Colors.white,
-                      fontWeight:
-                          isSelected ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  );
-                }).toList(),
-          ),
+        if (_isExpanded) ...[
+          const SizedBox(height: 8),
+          if (_allLabels.isEmpty)
+            const Text('No labels available. Create your first label!')
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children:
+                  _allLabels.map((label) {
+                    final isSelected = _selectedLabels.any(
+                      (l) => l.id == label.id,
+                    );
+                    return FilterChip(
+                      label: Text(label.name),
+                      selected: isSelected,
+                      onSelected: (_) => _toggleLabel(label),
+                      backgroundColor: _parseColor(label.color).withValues(alpha: 0.2),
+                      selectedColor: _parseColor(label.color).withValues(alpha: 0.6),
+                      checkmarkColor: Colors.white,
+                      labelStyle: TextStyle(
+                        color: Colors.white,
+                        fontWeight:
+                            isSelected ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    );
+                  }).toList(),
+            ),
+        ],
       ],
     );
   }

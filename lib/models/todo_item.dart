@@ -7,7 +7,8 @@ enum RecurrenceInterval {
   daily('daily'),
   weekly('weekly'),
   monthly('monthly'),
-  yearly('yearly');
+  yearly('yearly'),
+  weekdays('weekdays');
 
   const RecurrenceInterval(this.value);
   final String value;
@@ -22,6 +23,8 @@ enum RecurrenceInterval {
         return RecurrenceInterval.monthly;
       case 'yearly':
         return RecurrenceInterval.yearly;
+      case 'weekdays':
+        return RecurrenceInterval.weekdays;
       default:
         return RecurrenceInterval.none;
     }
@@ -39,6 +42,8 @@ enum RecurrenceInterval {
         return 'Monthly';
       case RecurrenceInterval.yearly:
         return 'Yearly';
+      case RecurrenceInterval.weekdays:
+        return 'Weekday';
     }
   }
 }
@@ -63,6 +68,7 @@ class ToDoItem {
   DateTime? nextOccurrenceDate;
   DateTime? createdAt;
   DateTime? completedAt; // Date when the task was marked as done
+  List<int> selectedWeekdays; // For 'weekdays' recurrence: 1=Mon, 7=Sun (DateTime.weekday)
   List<Label> labels = []; // Labels assigned to this task
   ToDoItem({
     this.id,
@@ -80,8 +86,9 @@ class ToDoItem {
     this.nextOccurrenceDate,
     this.createdAt,
     this.completedAt,
+    List<int>? selectedWeekdays,
     List<Label>? labels,
-  }) {
+  }) : selectedWeekdays = selectedWeekdays ?? [] {
     this.labels = labels ?? [];
   }
   // Method to convert a ToDoItem instance to a JSON map.
@@ -100,6 +107,7 @@ class ToDoItem {
       'original_recurring_task_id': originalRecurringTaskId,
       'next_occurrence_date': nextOccurrenceDate?.toIso8601String(),
       'completed_at': completedAt?.toIso8601String(),
+      'recurrence_weekdays': selectedWeekdays.isEmpty ? null : selectedWeekdays,
     };
     if (createdAt != null) {
       data['created_at'] = createdAt!.toIso8601String();
@@ -137,6 +145,10 @@ class ToDoItem {
       nextOccurrenceDate: json['next_occurrence_date'] != null ? DateTime.parse(json['next_occurrence_date']) : null,
       createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : null,
       completedAt: json['completed_at'] != null ? DateTime.parse(json['completed_at']) : null,
+      selectedWeekdays: (json['recurrence_weekdays'] as List?)
+              ?.map((e) => (e as num).toInt())
+              .toList() ??
+          [],
       labels: parsedLabels,
     );
     // Note: Subtasks would need to be loaded separately if stored in a related table.
@@ -169,6 +181,19 @@ class ToDoItem {
     return originalRecurringTaskId != null;
   }
 
+  // For a 'weekdays' recurrence, return the first selected weekday on or after
+  // [from], preserving the time-of-day. Used to snap the due date onto the
+  // first chosen day of the week when the task is created/edited.
+  DateTime? firstSelectedWeekdayOnOrAfter(DateTime from) {
+    if (selectedWeekdays.isEmpty) return null;
+    DateTime candidate = from;
+    for (int i = 0; i < 7; i++) {
+      if (selectedWeekdays.contains(candidate.weekday)) return candidate;
+      candidate = candidate.add(const Duration(days: 1));
+    }
+    return null;
+  }
+
   // Calculate next occurrence date based on current due date and recurrence interval
   DateTime? calculateNextOccurrence() {
     if (!isRecurring || dueDate == null || recurrenceInterval == RecurrenceInterval.none) {
@@ -185,6 +210,17 @@ class ToDoItem {
         return DateTime(currentDate.year, currentDate.month + 1, currentDate.day);
       case RecurrenceInterval.yearly:
         return DateTime(currentDate.year + 1, currentDate.month, currentDate.day);
+      case RecurrenceInterval.weekdays:
+        if (selectedWeekdays.isEmpty) return null;
+        DateTime next = currentDate.add(const Duration(days: 1));
+        // Walk forward up to 7 days to find the next selected weekday
+        for (int i = 0; i < 7; i++) {
+          if (selectedWeekdays.contains(next.weekday)) {
+            return next;
+          }
+          next = next.add(const Duration(days: 1));
+        }
+        return null;
       case RecurrenceInterval.none:
         return null;
     }

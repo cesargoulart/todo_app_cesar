@@ -414,9 +414,31 @@ class _ToDoListScreenState extends State<ToDoListScreen>
     }
     final originalStatus = todo.isDone;
     final originalCompletedAt = todo.completedAt;
+    final originalDueDate = todo.dueDate;
+    final originalNextOccurrence = todo.nextOccurrenceDate;
+
+    // Completing a recurring task advances its due date to the next chosen day
+    // instead of marking it permanently done — unless we've passed the end date.
+    DateTime? advancedDueDate;
+    if (!todo.isDone && todo.isRecurring) {
+      final next = todo.calculateNextOccurrence();
+      if (next != null &&
+          (todo.recurrenceEndDate == null ||
+              !next.isAfter(todo.recurrenceEndDate!))) {
+        advancedDueDate = next;
+      }
+    }
+
     setState(() {
-      todo.isDone = !todo.isDone;
-      todo.completedAt = todo.isDone ? DateTime.now() : null;
+      if (advancedDueDate != null) {
+        todo.dueDate = advancedDueDate;
+        todo.nextOccurrenceDate = todo.calculateNextOccurrence();
+        todo.isDone = false;
+        todo.completedAt = null;
+      } else {
+        todo.isDone = !todo.isDone;
+        todo.completedAt = todo.isDone ? DateTime.now() : null;
+      }
     });
     try {
       if (todo.isDone) {
@@ -444,6 +466,8 @@ class _ToDoListScreenState extends State<ToDoListScreen>
       setState(() {
         todo.isDone = originalStatus;
         todo.completedAt = originalCompletedAt;
+        todo.dueDate = originalDueDate;
+        todo.nextOccurrenceDate = originalNextOccurrence;
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -568,6 +592,8 @@ class _ToDoListScreenState extends State<ToDoListScreen>
         existingTodo?.recurrenceInterval ?? RecurrenceInterval.none;
     DateTime? recurrenceEndDate = existingTodo?.recurrenceEndDate;
     List<Label> selectedLabels = List.from(existingTodo?.labels ?? []);
+    bool isNotesExpanded = false;
+    List<int> selectedWeekdays = List.from(existingTodo?.selectedWeekdays ?? []);
 
     showDialog(
       context: context,
@@ -585,11 +611,244 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          isEditing ? 'Edit Task' : 'New Task',
-                          style: AppTextStyles.sectionLabel.copyWith(
-                            fontSize: 20,
-                          ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Text(
+                              isEditing ? 'Edit Task' : 'New Task',
+                              style: AppTextStyles.sectionLabel.copyWith(
+                                fontSize: 14, // A little bigger
+                              ),
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  decoration: BoxDecoration(
+                                    gradient: AppGradients.primary,
+                                    borderRadius: BorderRadius.circular(
+                                      AppRadius.button,
+                                    ),
+                                  ),
+                                  child: TextButton(
+                                    child: Text(
+                                      isEditing ? 'SAVE' : 'ADD',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    onPressed: () async {
+                                      final newTitle =
+                                          _textFieldController.text.trim();
+                                      if (newTitle.isNotEmpty) {
+                                        try {
+                                          if (isEditing) {
+                                            existingTodo.title = newTitle;
+                                            existingTodo.notes =
+                                                _notesFieldController.text
+                                                        .trim()
+                                                        .isEmpty
+                                                    ? null
+                                                    : _notesFieldController
+                                                        .text
+                                                        .trim();
+                                            existingTodo.dueDate =
+                                                selectedDueDate;
+                                            existingTodo.showOnlyOnDueDate =
+                                                showOnlyOnDueDate;
+                                            existingTodo.isRecurring =
+                                                isRecurring;
+                                            existingTodo.recurrenceInterval =
+                                                isRecurring
+                                                    ? recurrenceInterval
+                                                    : RecurrenceInterval.none;
+                                            existingTodo.recurrenceEndDate =
+                                                recurrenceEndDate;
+                                            existingTodo.selectedWeekdays =
+                                                isRecurring &&
+                                                        recurrenceInterval ==
+                                                            RecurrenceInterval
+                                                                .weekdays
+                                                    ? List.from(
+                                                        selectedWeekdays,
+                                                      )
+                                                    : [];
+                                            existingTodo.labels =
+                                                selectedLabels;
+                                            // Snap the due date onto the first
+                                            // selected day of the week.
+                                            if (isRecurring &&
+                                                recurrenceInterval ==
+                                                    RecurrenceInterval
+                                                        .weekdays &&
+                                                existingTodo.selectedWeekdays
+                                                    .isNotEmpty &&
+                                                existingTodo.dueDate != null) {
+                                              existingTodo.dueDate = existingTodo
+                                                      .firstSelectedWeekdayOnOrAfter(
+                                                          existingTodo
+                                                              .dueDate!) ??
+                                                  existingTodo.dueDate;
+                                            }
+                                            if (isRecurring &&
+                                                existingTodo.dueDate != null) {
+                                              existingTodo.nextOccurrenceDate =
+                                                  existingTodo
+                                                      .calculateNextOccurrence();
+                                            } else {
+                                              existingTodo.nextOccurrenceDate =
+                                                  null;
+                                            }
+                                            final updated =
+                                                await _syncService
+                                                    .saveTodoSafely(
+                                              existingTodo,
+                                            );
+                                            await _updateTaskLabels(
+                                              updated.id!,
+                                              selectedLabels,
+                                            );
+                                            if (updated.id != null &&
+                                                updated.dueDate != null) {
+                                              await _notificationService
+                                                  .scheduleTaskDueNotification(
+                                                    taskId: updated.id!,
+                                                    taskTitle: updated.title,
+                                                    dueDate: updated.dueDate!,
+                                                  );
+                                            }
+                                            if (context.mounted) {
+                                              setState(() {
+                                                final idx = _todos.indexWhere(
+                                                  (t) => t.id == updated.id,
+                                                );
+                                                if (idx != -1) {
+                                                  _todos[idx] = updated;
+                                                  _todos[idx].labels =
+                                                      selectedLabels;
+                                                }
+                                              });
+                                            }
+                                          } else {
+                                            final newTodo = ToDoItem(
+                                              title: newTitle,
+                                              notes: _notesFieldController
+                                                      .text
+                                                      .trim()
+                                                      .isEmpty
+                                                  ? null
+                                                  : _notesFieldController.text
+                                                      .trim(),
+                                              dueDate: selectedDueDate,
+                                              showOnlyOnDueDate:
+                                                  showOnlyOnDueDate,
+                                              isRecurring: isRecurring,
+                                              recurrenceInterval:
+                                                  isRecurring
+                                                      ? recurrenceInterval
+                                                      : RecurrenceInterval.none,
+                                              recurrenceEndDate:
+                                                  recurrenceEndDate,
+                                              selectedWeekdays:
+                                                  isRecurring &&
+                                                          recurrenceInterval ==
+                                                              RecurrenceInterval
+                                                                  .weekdays
+                                                      ? List.from(
+                                                          selectedWeekdays,
+                                                        )
+                                                      : [],
+                                            );
+                                            // Snap the due date onto the first
+                                            // selected day of the week.
+                                            if (isRecurring &&
+                                                recurrenceInterval ==
+                                                    RecurrenceInterval
+                                                        .weekdays &&
+                                                newTodo.selectedWeekdays
+                                                    .isNotEmpty &&
+                                                newTodo.dueDate != null) {
+                                              newTodo.dueDate = newTodo
+                                                      .firstSelectedWeekdayOnOrAfter(
+                                                          newTodo.dueDate!) ??
+                                                  newTodo.dueDate;
+                                            }
+                                            if (isRecurring &&
+                                                newTodo.dueDate != null) {
+                                              newTodo.nextOccurrenceDate =
+                                                  newTodo
+                                                      .calculateNextOccurrence();
+                                            }
+                                            if (isSubtask &&
+                                                parentTodo != null) {
+                                              newTodo.parentId = parentTodo.id;
+                                              await _syncService.saveTodoSafely(
+                                                newTodo,
+                                              );
+                                              // The sync service already adds the subtask
+                                              // to the parent in the cache and notifies the UI
+                                            } else {
+                                              final saved =
+                                                  await _syncService
+                                                      .saveTodoSafely(newTodo);
+                                              await _updateTaskLabels(
+                                                saved.id!,
+                                                selectedLabels,
+                                              );
+                                              saved.labels = selectedLabels;
+                                              if (saved.id != null &&
+                                                  saved.dueDate != null) {
+                                                await _notificationService
+                                                    .scheduleTaskDueNotification(
+                                                      taskId: saved.id!,
+                                                      taskTitle: saved.title,
+                                                      dueDate: saved.dueDate!,
+                                                    );
+                                              }
+                                            }
+                                          }
+                                        } catch (e) {
+                                          debugPrint('Error saving todo: $e');
+                                          if (context.mounted) {
+                                            ScaffoldMessenger.of(
+                                              context,
+                                            ).showSnackBar(
+                                              SnackBar(
+                                                content: Text(
+                                                  'Error saving: $e',
+                                                ),
+                                              ),
+                                            );
+                                          }
+                                        }
+                                      }
+                                      _textFieldController.clear();
+                                      _notesFieldController.clear();
+                                      if (context.mounted) {
+                                        Navigator.of(context).pop();
+                                      }
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                TextButton(
+                                  child: const Text(
+                                    'CANCEL',
+                                    style: TextStyle(
+                                      color: AppColors.textSecondary,
+                                    ),
+                                  ),
+                                  onPressed: () {
+                                    _textFieldController.clear();
+                                    _notesFieldController.clear();
+                                    Navigator.of(context).pop();
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 20),
                         // Title field
@@ -632,46 +891,88 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                           ),
                         ),
                         const SizedBox(height: 12),
-                        // Notes field
-                        TextField(
-                          controller: _notesFieldController,
-                          minLines: 2,
-                          maxLines: 5,
-                          style: const TextStyle(color: AppColors.textPrimary),
-                          decoration: InputDecoration(
-                            hintText: 'Notes…',
-                            hintStyle: const TextStyle(
-                              color: AppColors.textMuted,
-                            ),
-                            filled: true,
-                            fillColor: AppColors.overlay08,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(
-                                AppRadius.button,
-                              ),
-                              borderSide: const BorderSide(
-                                color: AppColors.borderCard,
-                              ),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(
-                                AppRadius.button,
-                              ),
-                              borderSide: const BorderSide(
-                                color: AppColors.borderCard,
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(
-                                AppRadius.button,
-                              ),
-                              borderSide: const BorderSide(
-                                color: AppColors.accentPurple,
-                                width: 1.5,
-                              ),
+                        // Notes section (collapsible)
+                        InkWell(
+                          onTap: () {
+                            setDs(() {
+                              isNotesExpanded = !isNotesExpanded;
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(4),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                Text(
+                                  'Notes',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color:
+                                        _notesFieldController.text
+                                                .trim()
+                                                .isNotEmpty
+                                            ? AppColors.accentGreen
+                                            : AppColors.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Icon(
+                                  isNotesExpanded
+                                      ? Icons.keyboard_arrow_up
+                                      : Icons.keyboard_arrow_down,
+                                  size: 20,
+                                  color: AppColors.textSecondary,
+                                ),
+                              ],
                             ),
                           ),
                         ),
+                        if (isNotesExpanded) ...[
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: _notesFieldController,
+                            minLines: 2,
+                            maxLines: 5,
+                            onChanged: (_) => setDs(() {}),
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Notes…',
+                              hintStyle: const TextStyle(
+                                color: AppColors.textMuted,
+                              ),
+                              filled: true,
+                              fillColor: AppColors.overlay08,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.button,
+                                ),
+                                borderSide: const BorderSide(
+                                  color: AppColors.borderCard,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.button,
+                                ),
+                                borderSide: const BorderSide(
+                                  color: AppColors.borderCard,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(
+                                  AppRadius.button,
+                                ),
+                                borderSide: const BorderSide(
+                                  color: AppColors.accentPurple,
+                                  width: 1.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 20),
                         // Due date
                         Row(
@@ -755,6 +1056,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                 if (!isRecurring) {
                                   recurrenceInterval = RecurrenceInterval.none;
                                   recurrenceEndDate = null;
+                                  selectedWeekdays = [];
                                 } else {
                                   if (recurrenceInterval ==
                                       RecurrenceInterval.none) {
@@ -807,6 +1109,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                         RecurrenceInterval.weekly,
                                         RecurrenceInterval.monthly,
                                         RecurrenceInterval.yearly,
+                                        RecurrenceInterval.weekdays,
                                       ]
                                       .map(
                                         (i) => DropdownMenuItem(
@@ -817,11 +1120,118 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                       .toList(),
                               onChanged:
                                   (v) => setDs(
-                                    () =>
-                                        recurrenceInterval =
-                                            v ?? RecurrenceInterval.weekly,
+                                    () {
+                                      recurrenceInterval =
+                                          v ?? RecurrenceInterval.weekly;
+                                      if (recurrenceInterval ==
+                                          RecurrenceInterval.weekdays) {
+                                        if (selectedDueDate != null &&
+                                            selectedWeekdays.isEmpty) {
+                                          selectedWeekdays = [
+                                            selectedDueDate!.weekday,
+                                          ];
+                                        }
+                                      } else {
+                                        selectedWeekdays = [];
+                                      }
+                                    },
                                   ),
                             ),
+                            if (recurrenceInterval ==
+                                RecurrenceInterval.weekdays) ...[
+                              const SizedBox(height: 12),
+                              const Text(
+                                'On days',
+                                style: TextStyle(
+                                  color: AppColors.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: List.generate(7, (i) {
+                                  // DateTime.weekday: 1=Mon, 7=Sun
+                                  const labels = [
+                                    'M',
+                                    'T',
+                                    'W',
+                                    'T',
+                                    'F',
+                                    'S',
+                                    'S',
+                                  ];
+                                  const fullNames = [
+                                    'Mon',
+                                    'Tue',
+                                    'Wed',
+                                    'Thu',
+                                    'Fri',
+                                    'Sat',
+                                    'Sun',
+                                  ];
+                                  final day = i + 1;
+                                  final isSelected = selectedWeekdays.contains(
+                                    day,
+                                  );
+                                  return GestureDetector(
+                                    onTap: () {
+                                      setDs(() {
+                                        if (isSelected) {
+                                          selectedWeekdays.remove(day);
+                                        } else {
+                                          selectedWeekdays.add(day);
+                                          selectedWeekdays.sort();
+                                        }
+                                      });
+                                    },
+                                    child: Container(
+                                      width: 36,
+                                      height: 36,
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                        color: isSelected
+                                            ? AppColors.accentPurple
+                                            : AppColors.overlay08,
+                                        borderRadius: BorderRadius.circular(
+                                          18,
+                                        ),
+                                        border: Border.all(
+                                          color: isSelected
+                                              ? AppColors.accentPurple
+                                              : AppColors.borderCard,
+                                          width: 1,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        labels[i],
+                                        style: TextStyle(
+                                          color: isSelected
+                                              ? Colors.white
+                                              : AppColors.textPrimary,
+                                          fontWeight: isSelected
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }),
+                              ),
+                              if (selectedWeekdays.isEmpty)
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 6),
+                                  child: Text(
+                                    'Pick at least one day',
+                                    style: TextStyle(
+                                      color: AppColors.accentRed,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                            ],
                             const SizedBox(height: 10),
                             Row(
                               children: [
@@ -905,169 +1315,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                               }),
                         ),
                         // Actions
-                        const SizedBox(height: 24),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              child: const Text(
-                                'CANCEL',
-                                style: TextStyle(
-                                  color: AppColors.textSecondary,
-                                ),
-                              ),
-                              onPressed: () {
-                                _textFieldController.clear();
-                                _notesFieldController.clear();
-                                Navigator.of(context).pop();
-                              },
-                            ),
-                            const SizedBox(width: 8),
-                            Container(
-                              decoration: BoxDecoration(
-                                gradient: AppGradients.primary,
-                                borderRadius: BorderRadius.circular(
-                                  AppRadius.button,
-                                ),
-                              ),
-                              child: TextButton(
-                                child: Text(
-                                  isEditing ? 'SAVE' : 'ADD',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                onPressed: () async {
-                                  final newTitle =
-                                      _textFieldController.text.trim();
-                                  if (newTitle.isNotEmpty) {
-                                    try {
-                                      if (isEditing) {
-                                        existingTodo.title = newTitle;
-                                        existingTodo.notes =
-                                            _notesFieldController.text
-                                                    .trim()
-                                                    .isEmpty
-                                                ? null
-                                                : _notesFieldController.text
-                                                    .trim();
-                                        existingTodo.dueDate = selectedDueDate;
-                                        existingTodo.showOnlyOnDueDate =
-                                            showOnlyOnDueDate;
-                                        existingTodo.isRecurring = isRecurring;
-                                        existingTodo.recurrenceInterval =
-                                            isRecurring
-                                                ? recurrenceInterval
-                                                : RecurrenceInterval.none;
-                                        existingTodo.recurrenceEndDate =
-                                            recurrenceEndDate;
-                                        existingTodo.labels = selectedLabels;
-                                        if (isRecurring &&
-                                            existingTodo.dueDate != null) {
-                                          existingTodo.nextOccurrenceDate =
-                                              existingTodo
-                                                  .calculateNextOccurrence();
-                                        } else {
-                                          existingTodo.nextOccurrenceDate =
-                                              null;
-                                        }
-                                        final updated = await _syncService
-                                            .saveTodoSafely(existingTodo);
-                                        await _updateTaskLabels(
-                                          updated.id!,
-                                          selectedLabels,
-                                        );
-                                        if (updated.id != null &&
-                                            updated.dueDate != null) {
-                                          await _notificationService
-                                              .scheduleTaskDueNotification(
-                                                taskId: updated.id!,
-                                                taskTitle: updated.title,
-                                                dueDate: updated.dueDate!,
-                                              );
-                                        }
-                                        setState(() {
-                                          final idx = _todos.indexWhere(
-                                            (t) => t.id == updated.id,
-                                          );
-                                          if (idx != -1) {
-                                            _todos[idx] = updated;
-                                            _todos[idx].labels = selectedLabels;
-                                          }
-                                        });
-                                      } else {
-                                        final newTodo = ToDoItem(
-                                          title: newTitle,
-                                          notes:
-                                              _notesFieldController.text
-                                                      .trim()
-                                                      .isEmpty
-                                                  ? null
-                                                  : _notesFieldController.text
-                                                      .trim(),
-                                          dueDate: selectedDueDate,
-                                          showOnlyOnDueDate: showOnlyOnDueDate,
-                                          isRecurring: isRecurring,
-                                          recurrenceInterval:
-                                              isRecurring
-                                                  ? recurrenceInterval
-                                                  : RecurrenceInterval.none,
-                                          recurrenceEndDate: recurrenceEndDate,
-                                        );
-                                        if (isRecurring &&
-                                            newTodo.dueDate != null) {
-                                          newTodo.nextOccurrenceDate =
-                                              newTodo.calculateNextOccurrence();
-                                        }
-                                        if (isSubtask && parentTodo != null) {
-                                          newTodo.parentId = parentTodo.id;
-                                          await _syncService.saveTodoSafely(
-                                            newTodo,
-                                          );
-                                          // The sync service already adds the subtask
-                                          // to the parent in the cache and notifies the UI
-                                        } else {
-                                          final saved = await _syncService
-                                              .saveTodoSafely(newTodo);
-                                          await _updateTaskLabels(
-                                            saved.id!,
-                                            selectedLabels,
-                                          );
-                                          saved.labels = selectedLabels;
-                                          if (saved.id != null &&
-                                              saved.dueDate != null) {
-                                            await _notificationService
-                                                .scheduleTaskDueNotification(
-                                                  taskId: saved.id!,
-                                                  taskTitle: saved.title,
-                                                  dueDate: saved.dueDate!,
-                                                );
-                                          }
-                                        }
-                                      }
-                                    } catch (e) {
-                                      debugPrint('Error saving todo: $e');
-                                      if (context.mounted) {
-                                        ScaffoldMessenger.of(
-                                          context,
-                                        ).showSnackBar(
-                                          SnackBar(
-                                            content: Text('Error saving: $e'),
-                                          ),
-                                        );
-                                      }
-                                    }
-                                  }
-                                  _textFieldController.clear();
-                                  _notesFieldController.clear();
-                                  if (context.mounted)
-                                    Navigator.of(context).pop();
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
+                        const SizedBox(height: 12),
                       ],
                     ),
                   ),
