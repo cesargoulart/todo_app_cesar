@@ -7,7 +7,7 @@ class LabelService {
   static final LabelService _instance = LabelService._internal();
   factory LabelService() => _instance;
   LabelService._internal();
-  
+
   SupabaseClient get _client => Supabase.instance.client;
   final String _labelsTable = 'todo_labels';
   final String _taskLabelsTable = 'todo_task_labels';
@@ -21,7 +21,7 @@ class LabelService {
           .order('name', ascending: true);
 
       if (response.isEmpty) return [];
-      
+
       return (response as List)
           .map((json) => Label.fromJson(json as Map<String, dynamic>))
           .toList();
@@ -34,15 +34,13 @@ class LabelService {
   // Create a new label
   Future<Label> createLabel(String name, String color) async {
     try {
-      final response = await _client
-          .from(_labelsTable)
-          .insert({
-            'name': name,
-            'color': color,
-          })
-          .select()
-          .single();
-      
+      final response =
+          await _client
+              .from(_labelsTable)
+              .insert({'name': name, 'color': color})
+              .select()
+              .single();
+
       return Label.fromJson(response);
     } catch (e) {
       print('Error creating label: $e');
@@ -53,16 +51,14 @@ class LabelService {
   // Update an existing label
   Future<Label> updateLabel(Label label) async {
     try {
-      final response = await _client
-          .from(_labelsTable)
-          .update({
-            'name': label.name,
-            'color': label.color,
-          })
-          .eq('id', label.id!)
-          .select()
-          .single();
-      
+      final response =
+          await _client
+              .from(_labelsTable)
+              .update({'name': label.name, 'color': label.color})
+              .eq('id', label.id!)
+              .select()
+              .single();
+
       return Label.fromJson(response);
     } catch (e) {
       print('Error updating label: $e');
@@ -124,13 +120,54 @@ class LabelService {
           .eq('task_id', taskId);
 
       if (response.isEmpty) return [];
-      
+
       return (response as List)
-          .map((item) => Label.fromJson(item['todo_labels'] as Map<String, dynamic>))
+          .map(
+            (item) =>
+                Label.fromJson(item['todo_labels'] as Map<String, dynamic>),
+          )
           .toList();
     } catch (e) {
       print('Error getting labels for task: $e');
       return [];
     }
+  }
+
+  /// Carrega as etiquetas de várias tarefas numa única consulta.
+  Future<Map<String, List<Label>>> getLabelsForTasks(
+    Iterable<String> taskIds,
+  ) async {
+    final ids = taskIds.toSet().toList();
+    final labelsByTask = <String, List<Label>>{
+      for (final id in ids) id: <Label>[],
+    };
+
+    if (ids.isEmpty) return labelsByTask;
+
+    final response = await _client
+        .from(_taskLabelsTable)
+        .select('''
+          task_id,
+          todo_labels (
+            id,
+            name,
+            color,
+            created_at,
+            updated_at
+          )
+        ''')
+        .inFilter('task_id', ids);
+
+    for (final item in response) {
+      final taskId = item['task_id'] as String?;
+      final labelData = item['todo_labels'];
+      if (taskId == null || labelData is! Map) continue;
+
+      labelsByTask[taskId]?.add(
+        Label.fromJson(Map<String, dynamic>.from(labelData)),
+      );
+    }
+
+    return labelsByTask;
   }
 }

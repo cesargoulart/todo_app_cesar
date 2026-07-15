@@ -26,7 +26,9 @@ class AppThemeData {
         floatingActionButtonTheme: const FloatingActionButtonThemeData(
           backgroundColor: AppColors.accentPurple,
         ),
-        dialogBackgroundColor: AppColors.bgSurface,
+        dialogTheme: const DialogThemeData(
+          backgroundColor: AppColors.bgSurface,
+        ),
         bottomSheetTheme: const BottomSheetThemeData(
           backgroundColor: AppColors.bgSurface,
         ),
@@ -42,7 +44,7 @@ class AppThemeData {
                   : AppColors.textMuted),
           trackColor: WidgetStateProperty.resolveWith((states) =>
               states.contains(WidgetState.selected)
-                  ? AppColors.accentPurple.withOpacity(0.4)
+                  ? AppColors.accentPurple.withValues(alpha: 0.4)
                   : AppColors.overlay08),
         ),
         checkboxTheme: CheckboxThemeData(

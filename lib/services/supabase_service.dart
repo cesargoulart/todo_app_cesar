@@ -9,47 +9,54 @@ class SupabaseService {
   static final SupabaseService _instance = SupabaseService._internal();
   factory SupabaseService() => _instance;
   SupabaseService._internal();
-  
+
   // Get a reference to the Supabase client with error handling
   SupabaseClient get _client {
     try {
       return Supabase.instance.client;
     } catch (e) {
-      throw Exception('Supabase client not initialized. Make sure Supabase.initialize() is called before using SupabaseService. Error: $e');
+      throw Exception(
+        'Supabase client not initialized. Make sure Supabase.initialize() is called before using SupabaseService. Error: $e',
+      );
     }
   }
+
   final LabelService _labelService = LabelService();
   final NotificationService _notificationService = NotificationService();
 
   // IMPORTANT: This is where you define your table name.
   // This must match the table name in your Supabase dashboard.
-  final String _tableName = 'todo_cesar';  // Load all todos from Supabase (including recurring task instances and labels)
+  final String _tableName =
+      'todo_cesar'; // Load all todos from Supabase (including recurring task instances and labels)
   Future<List<ToDoItem>> loadTodos() async {
     try {
       // First generate any pending recurring task instances
       await generateRecurringTaskInstances();
-      
+
       final response = await _client
           .from(_tableName)
           .select()
           .order('due_date', ascending: true);
 
       if (response.isEmpty) return [];
-      
-      List<ToDoItem> todos = (response as List)
-          .map((json) => ToDoItem.fromJson(json as Map<String, dynamic>))
-          .toList();
 
-      // Load labels for each todo
-      for (ToDoItem todo in todos) {
-        if (todo.id != null) {
-          todo.labels = await _labelService.getLabelsForTask(todo.id!);
-        }
+      List<ToDoItem> todos =
+          (response as List)
+              .map((json) => ToDoItem.fromJson(json as Map<String, dynamic>))
+              .toList();
+
+      // Load all task labels in one query instead of one request per task.
+      final labelsByTask = await _labelService.getLabelsForTasks(
+        todos.where((todo) => todo.id != null).map((todo) => todo.id!),
+      );
+      for (final todo in todos) {
+        todo.labels = labelsByTask[todo.id] ?? [];
       }
 
       // Assemble subtasks into their parent tasks
       final todoMap = <String, ToDoItem>{
-        for (final t in todos) if (t.id != null) t.id!: t,
+        for (final t in todos)
+          if (t.id != null) t.id!: t,
       };
       final topLevel = <ToDoItem>[];
       for (final todo in todos) {
@@ -63,7 +70,8 @@ class SupabaseService {
       return topLevel;
     } catch (e) {
       print('Error loading todos: $e');
-      return [];    }
+      return [];
+    }
   }
 
   // Generate recurring task instances by calling the database function
@@ -74,41 +82,44 @@ class SupabaseService {
       print('Error generating recurring task instances: $e');
       // Don't rethrow - this shouldn't break the app if it fails
     }
-  }  // Save a single todo to Supabase
+  } // Save a single todo to Supabase
+
   Future<ToDoItem> saveTodo(ToDoItem todo) async {
     try {
       final todoJson = todo.toJson();
-      
+
       // Remove null ID to let Supabase generate it
       if (todoJson['id'] == null) {
         todoJson.remove('id');
       }
-      
+
       // If this is a recurring task, ensure next occurrence is calculated
-      if (todo.isRecurring && todo.dueDate != null && todo.recurrenceInterval != RecurrenceInterval.none) {
+      if (todo.isRecurring &&
+          todo.dueDate != null &&
+          todo.recurrenceInterval != RecurrenceInterval.none) {
         if (todo.nextOccurrenceDate == null) {
           todo.nextOccurrenceDate = todo.calculateNextOccurrence();
         }
-        todoJson['next_occurrence_date'] = todo.nextOccurrenceDate?.toIso8601String();
-        
+        todoJson['next_occurrence_date'] =
+            todo.nextOccurrenceDate?.toIso8601String();
+
         // Debug logging
         print('Saving recurring task:');
         print('  isRecurring: ${todo.isRecurring}');
         print('  recurrenceInterval: ${todo.recurrenceInterval.value}');
         print('  dueDate: ${todo.dueDate}');
         print('  nextOccurrenceDate: ${todo.nextOccurrenceDate}');
-        print('  todoJson next_occurrence_date: ${todoJson['next_occurrence_date']}');
+        print(
+          '  todoJson next_occurrence_date: ${todoJson['next_occurrence_date']}',
+        );
       }
-      
-      final response = await _client
-          .from(_tableName)
-          .upsert(todoJson)
-          .select()
-          .single();
-      
+
+      final response =
+          await _client.from(_tableName).upsert(todoJson).select().single();
+
       // Return the todo with the database-generated ID
       ToDoItem savedTodo = ToDoItem.fromJson(response);
-      
+
       // Keep local notifications in sync with the persisted task state.
       try {
         if (savedTodo.id != null) {
@@ -121,33 +132,33 @@ class SupabaseService {
       } catch (notifError) {
         print('Warning: Notification update failed after save: $notifError');
       }
-      
+
       return savedTodo;
     } catch (e) {
       print('Error saving todo: $e');
       rethrow;
     }
-  }// Save multiple todos to Supabase
+  } // Save multiple todos to Supabase
+
   Future<List<ToDoItem>> saveTodos(List<ToDoItem> todos) async {
     if (todos.isEmpty) return [];
-    
+
     try {
       // Convert all todos to JSON for batch insert/update
-      final todoJsonList = todos.map((todo) {
-        final todoJson = todo.toJson();
-        // Remove null ID to let Supabase generate it
-        if (todoJson['id'] == null) {
-          todoJson.remove('id');
-        }
-        return todoJson;
-      }).toList();
-      
+      final todoJsonList =
+          todos.map((todo) {
+            final todoJson = todo.toJson();
+            // Remove null ID to let Supabase generate it
+            if (todoJson['id'] == null) {
+              todoJson.remove('id');
+            }
+            return todoJson;
+          }).toList();
+
       // Use upsert to insert new todos or update existing ones
-      final response = await _client
-          .from(_tableName)
-          .upsert(todoJsonList)
-          .select();
-      
+      final response =
+          await _client.from(_tableName).upsert(todoJsonList).select();
+
       // Return the todos with database-generated IDs
       return (response as List)
           .map((json) => ToDoItem.fromJson(json as Map<String, dynamic>))
@@ -166,7 +177,9 @@ class SupabaseService {
       try {
         await _notificationService.cancelTaskNotifications(id);
       } catch (notifError) {
-        print('Warning: Could not cancel notifications during deletion: $notifError');
+        print(
+          'Warning: Could not cancel notifications during deletion: $notifError',
+        );
         // Continue with deletion even if notification cancellation fails
       }
 
@@ -180,10 +193,7 @@ class SupabaseService {
   // Update a todo's status
   Future<void> updateTodoStatus(String id, bool isDone) async {
     try {
-      await _client
-          .from(_tableName)
-          .update({'is_done': isDone})
-          .eq('id', id);
+      await _client.from(_tableName).update({'is_done': isDone}).eq('id', id);
 
       // Handle notifications with error protection
       try {
@@ -194,7 +204,9 @@ class SupabaseService {
           // Show completion notification (optional)
           final todo = await _getTaskById(id);
           if (todo != null) {
-            await _notificationService.showTaskCompletedNotification(taskTitle: todo.title);
+            await _notificationService.showTaskCompletedNotification(
+              taskTitle: todo.title,
+            );
           }
         } else {
           // Re-schedule notifications when task is marked as not done
@@ -212,6 +224,7 @@ class SupabaseService {
       rethrow;
     }
   }
+
   // Add a subtask to a parent todo
   Future<void> addSubtask(ToDoItem parentTodo, ToDoItem subtask) async {
     try {
@@ -219,13 +232,13 @@ class SupabaseService {
       if (parentTodo.id != null) {
         subtask.parentId = parentTodo.id;
       }
-      
+
       // Save the subtask to the database
       await saveTodo(subtask);
-      
+
       // Update the parent's subtasks array in memory
       parentTodo.addSubtask(subtask);
-      
+
       // Update the parent in the database with the new subtasks
       await saveTodo(parentTodo);
     } catch (e) {
@@ -239,19 +252,22 @@ class SupabaseService {
     try {
       // Delete the subtask from the database
       await deleteTodo(subtaskId);
-      
+
       // Remove from parent's subtasks array in memory
       parentTodo.removeSubtask(subtaskId);
-      
+
       // Update the parent in the database
       await saveTodo(parentTodo);
     } catch (e) {
-      print('Error removing subtask: $e');      rethrow;
+      print('Error removing subtask: $e');
+      rethrow;
     }
   }
 
   // Get all recurring task instances for a specific original task
-  Future<List<ToDoItem>> getRecurringTaskInstances(String originalTaskId) async {
+  Future<List<ToDoItem>> getRecurringTaskInstances(
+    String originalTaskId,
+  ) async {
     try {
       final response = await _client
           .from(_tableName)
@@ -260,7 +276,7 @@ class SupabaseService {
           .order('due_date', ascending: true);
 
       if (response.isEmpty) return [];
-      
+
       return (response as List)
           .map((json) => ToDoItem.fromJson(json as Map<String, dynamic>))
           .toList();
@@ -271,7 +287,10 @@ class SupabaseService {
   }
 
   // Delete a recurring task and optionally its instances
-  Future<void> deleteRecurringTask(String id, {bool deleteInstances = false}) async {
+  Future<void> deleteRecurringTask(
+    String id, {
+    bool deleteInstances = false,
+  }) async {
     try {
       if (deleteInstances) {
         // Delete all instances first
@@ -280,7 +299,7 @@ class SupabaseService {
             .delete()
             .eq('original_recurring_task_id', id);
       }
-      
+
       // Delete the original recurring task
       await _client.from(_tableName).delete().eq('id', id);
     } catch (e) {
@@ -293,20 +312,22 @@ class SupabaseService {
   Future<ToDoItem> updateRecurringTask(ToDoItem todo) async {
     try {
       final todoJson = todo.toJson();
-      
+
       // Recalculate next occurrence if settings changed
       if (todo.isRecurring && todo.dueDate != null) {
         todo.nextOccurrenceDate = todo.calculateNextOccurrence();
-        todoJson['next_occurrence_date'] = todo.nextOccurrenceDate?.toIso8601String();
+        todoJson['next_occurrence_date'] =
+            todo.nextOccurrenceDate?.toIso8601String();
       }
-      
-      final response = await _client
-          .from(_tableName)
-          .update(todoJson)
-          .eq('id', todo.id!)
-          .select()
-          .single();
-      
+
+      final response =
+          await _client
+              .from(_tableName)
+              .update(todoJson)
+              .eq('id', todo.id!)
+              .select()
+              .single();
+
       return ToDoItem.fromJson(response);
     } catch (e) {
       print('Error updating recurring task: $e');
@@ -317,12 +338,9 @@ class SupabaseService {
   // Helper method to get a task by ID
   Future<ToDoItem?> _getTaskById(String id) async {
     try {
-      final response = await _client
-          .from(_tableName)
-          .select()
-          .eq('id', id)
-          .single();
-      
+      final response =
+          await _client.from(_tableName).select().eq('id', id).single();
+
       return ToDoItem.fromJson(response);
     } catch (e) {
       print('Error getting task by ID: $e');

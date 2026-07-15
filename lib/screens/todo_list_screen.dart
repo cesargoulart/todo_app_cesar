@@ -63,8 +63,10 @@ class _ToDoListScreenState extends State<ToDoListScreen>
   late AnimationController _headerCtrl;
   late Animation<double> _headerFade;
 
-  bool get _isNotasView =>
-      _filterByLabel?.name.toLowerCase() == 'notas';
+  // Periodic rebuild so time-relative UI (overdue state) stays fresh.
+  Timer? _uiRefreshTimer;
+
+  bool get _isNotasView => _filterByLabel?.name.toLowerCase() == 'notas';
 
   bool _hasBirthdayLabel(List<Label> labels) {
     return labels.any((label) {
@@ -94,8 +96,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
 
   List<ToDoItem> get _filteredTodos {
     // Only show top-level tasks; subtasks live inside their parent's card
-    List<ToDoItem> filtered =
-        _todos.where((t) => t.parentId == null).toList();
+    List<ToDoItem> filtered = _todos.where((t) => t.parentId == null).toList();
 
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -104,11 +105,14 @@ class _ToDoListScreenState extends State<ToDoListScreen>
     switch (_activeFilter) {
       case TodoFilter.personal:
         // Show only Personal-labelled tasks (pending only)
-        filtered = filtered
-            .where((t) =>
-                !t.isDone &&
-                t.labels.any((l) => l.name.toLowerCase() == 'personal'))
-            .toList();
+        filtered =
+            filtered
+                .where(
+                  (t) =>
+                      !t.isDone &&
+                      t.labels.any((l) => l.name.toLowerCase() == 'personal'),
+                )
+                .toList();
         filtered.sort((a, b) {
           final aDate = a.dueDate;
           final bDate = b.dueDate;
@@ -159,16 +163,20 @@ class _ToDoListScreenState extends State<ToDoListScreen>
 
     // Exclude Personal and Notas tasks unless their label is explicitly selected
     if (_filterByLabel?.name.toLowerCase() != 'personal') {
-      filtered = filtered
-          .where(
-              (t) => !t.labels.any((l) => l.name.toLowerCase() == 'personal'))
-          .toList();
+      filtered =
+          filtered
+              .where(
+                (t) => !t.labels.any((l) => l.name.toLowerCase() == 'personal'),
+              )
+              .toList();
     }
     if (_filterByLabel?.name.toLowerCase() != 'notas') {
-      filtered = filtered
-          .where(
-              (t) => !t.labels.any((l) => l.name.toLowerCase() == 'notas'))
-          .toList();
+      filtered =
+          filtered
+              .where(
+                (t) => !t.labels.any((l) => l.name.toLowerCase() == 'notas'),
+              )
+              .toList();
     }
 
     // Hide completed
@@ -263,6 +271,11 @@ class _ToDoListScreenState extends State<ToDoListScreen>
     _headerCtrl.forward();
     _initializeSyncService();
     _loadAllLabels();
+    // Rebuild every 30s so time-relative UI (e.g. overdue highlighting)
+    // stays correct even without a data change.
+    _uiRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -308,9 +321,9 @@ class _ToDoListScreenState extends State<ToDoListScreen>
     } catch (e) {
       setState(() => task.dueDate = previousDue);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error snoozing task: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error snoozing task: $e')));
       }
     }
   }
@@ -327,6 +340,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
 
   @override
   void dispose() {
+    _uiRefreshTimer?.cancel();
     _headerCtrl.dispose();
     _deadlineMonitor.dispose();
     _syncService.dispose();
@@ -371,6 +385,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
       },
       onSyncError: (error) {
         if (mounted) {
+          setState(() => _isLoading = false);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Sync error: $error'),
@@ -1007,8 +1022,9 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                         }
                                         if (isSubtask && parentTodo != null) {
                                           newTodo.parentId = parentTodo.id;
-                                          await _syncService
-                                              .saveTodoSafely(newTodo);
+                                          await _syncService.saveTodoSafely(
+                                            newTodo,
+                                          );
                                           // The sync service already adds the subtask
                                           // to the parent in the cache and notifies the UI
                                         } else {
@@ -1313,7 +1329,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: AppColors.accentPurple.withOpacity(0.2),
+                      color: AppColors.accentPurple.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(AppRadius.small),
                     ),
                     child: const Icon(
@@ -1621,7 +1637,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 6),
-      color: AppColors.accentPurple.withOpacity(0.12),
+      color: AppColors.accentPurple.withValues(alpha: 0.12),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -1631,7 +1647,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
             child: CircularProgressIndicator(
               strokeWidth: 1.5,
               valueColor: AlwaysStoppedAnimation<Color>(
-                AppColors.accentPurple.withOpacity(0.8),
+                AppColors.accentPurple.withValues(alpha: 0.8),
               ),
             ),
           ),
@@ -1672,7 +1688,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: AppColors.accentPurple.withOpacity(0.25),
+                color: AppColors.accentPurple.withValues(alpha: 0.25),
                 borderRadius: BorderRadius.circular(AppRadius.badge),
               ),
               child: Text(
@@ -1691,7 +1707,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: AppColors.accentBlue.withOpacity(0.2),
+                  color: AppColors.accentBlue.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(AppRadius.badge),
                 ),
                 child: Row(
@@ -1730,7 +1746,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
               child: CircularProgressIndicator(
                 strokeWidth: 2,
                 valueColor: AlwaysStoppedAnimation<Color>(
-                  AppColors.accentPurple.withOpacity(0.8),
+                  AppColors.accentPurple.withValues(alpha: 0.8),
                 ),
               ),
             ),
@@ -1761,8 +1777,8 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                     return NoteCardWidget(
                       key: ValueKey(todo.id ?? todo.title),
                       note: todo,
-                      onEdit: () =>
-                          _showAddOrEditNoteDialog(existingNote: todo),
+                      onEdit:
+                          () => _showAddOrEditNoteDialog(existingNote: todo),
                       onDelete: () => _deleteToDoItem(todo),
                     );
                   }
@@ -1795,13 +1811,13 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  color: AppColors.accentPurple.withOpacity(0.1),
+                  color: AppColors.accentPurple.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   Icons.task_alt_rounded,
                   size: 40,
-                  color: AppColors.accentPurple.withOpacity(0.5),
+                  color: AppColors.accentPurple.withValues(alpha: 0.5),
                 ),
               ),
               const SizedBox(height: 20),
@@ -1833,9 +1849,11 @@ class _ToDoListScreenState extends State<ToDoListScreen>
         boxShadow: AppShadows.fabGlow,
       ),
       child: FloatingActionButton(
-        onPressed: () => _isNotasView
-            ? _showAddOrEditNoteDialog()
-            : _showAddOrEditToDoDialog(),
+        onPressed:
+            () =>
+                _isNotasView
+                    ? _showAddOrEditNoteDialog()
+                    : _showAddOrEditToDoDialog(),
         tooltip: _isNotasView ? 'Add Note' : 'Add Task',
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -1847,148 +1865,161 @@ class _ToDoListScreenState extends State<ToDoListScreen>
   // ── Notes dialog ──────────────────────────────────────────────────────────────
 
   void _showAddOrEditNoteDialog({ToDoItem? existingNote}) {
-    final titleCtrl =
-        TextEditingController(text: existingNote?.title ?? '');
-    final bodyCtrl =
-        TextEditingController(text: existingNote?.body ?? '');
+    final titleCtrl = TextEditingController(text: existingNote?.title ?? '');
+    final bodyCtrl = TextEditingController(text: existingNote?.body ?? '');
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(ctx).viewInsets.bottom,
-        ),
-        child: Container(
-          decoration: const BoxDecoration(
-            color: AppColors.bgSurface,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Handle bar
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.borderSubtle,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
+      builder:
+          (ctx) => Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom,
+            ),
+            child: Container(
+              decoration: const BoxDecoration(
+                color: AppColors.bgSurface,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
-              const SizedBox(height: 20),
-              Text(
-                existingNote == null ? 'New Note' : 'Edit Note',
-                style: const TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 16),
-              // Title field
-              TextField(
-                controller: titleCtrl,
-                autofocus: true,
-                style: const TextStyle(
-                    color: AppColors.textPrimary, fontSize: 15),
-                decoration: InputDecoration(
-                  hintText: 'Title',
-                  hintStyle: const TextStyle(color: AppColors.textMuted),
-                  filled: true,
-                  fillColor: AppColors.overlay08,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Handle bar
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.borderSubtle,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
-                ),
-              ),
-              const SizedBox(height: 12),
-              // Body field
-              TextField(
-                controller: bodyCtrl,
-                maxLines: 5,
-                style: const TextStyle(
-                    color: AppColors.textPrimary, fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'Write your note…',
-                  hintStyle: const TextStyle(color: AppColors.textMuted),
-                  filled: true,
-                  fillColor: AppColors.overlay08,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+                  const SizedBox(height: 20),
+                  Text(
+                    existingNote == null ? 'New Note' : 'Edit Note',
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
-                ),
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.accentPurple,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                    elevation: 0,
+                  const SizedBox(height: 16),
+                  // Title field
+                  TextField(
+                    controller: titleCtrl,
+                    autofocus: true,
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 15,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'Title',
+                      hintStyle: const TextStyle(color: AppColors.textMuted),
+                      filled: true,
+                      fillColor: AppColors.overlay08,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                    ),
                   ),
-                  onPressed: () async {
-                    final title = titleCtrl.text.trim();
-                    if (title.isEmpty) return;
-                    Navigator.of(ctx).pop();
-                    try {
-                      if (existingNote != null) {
-                        existingNote.title = title;
-                        existingNote.body = bodyCtrl.text.trim();
-                        await _syncService.saveTodoSafely(existingNote);
-                      } else {
-                        final note = ToDoItem(
-                          title: title,
-                          body: bodyCtrl.text.trim(),
-                          createdAt: DateTime.now(),
-                        );
-                        // Assign Notas label
-                        final saved =
-                            await _syncService.saveTodoSafely(note);
-                        if (saved.id != null && _filterByLabel != null) {
-                          await _labelService.addLabelToTask(
-                              saved.id!, _filterByLabel!.id!);
+                  const SizedBox(height: 12),
+                  // Body field
+                  TextField(
+                    controller: bodyCtrl,
+                    maxLines: 5,
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 14,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'Write your note…',
+                      hintStyle: const TextStyle(color: AppColors.textMuted),
+                      filled: true,
+                      fillColor: AppColors.overlay08,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.accentPurple,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                      onPressed: () async {
+                        final title = titleCtrl.text.trim();
+                        if (title.isEmpty) return;
+                        Navigator.of(ctx).pop();
+                        try {
+                          if (existingNote != null) {
+                            existingNote.title = title;
+                            existingNote.body = bodyCtrl.text.trim();
+                            await _syncService.saveTodoSafely(existingNote);
+                          } else {
+                            final note = ToDoItem(
+                              title: title,
+                              body: bodyCtrl.text.trim(),
+                              createdAt: DateTime.now(),
+                            );
+                            // Assign Notas label
+                            final saved = await _syncService.saveTodoSafely(
+                              note,
+                            );
+                            if (saved.id != null && _filterByLabel != null) {
+                              await _labelService.addLabelToTask(
+                                saved.id!,
+                                _filterByLabel!.id!,
+                              );
+                              if (mounted) {
+                                setState(() {
+                                  saved.labels = [_filterByLabel!];
+                                });
+                              }
+                            }
+                          }
+                        } catch (e) {
                           if (mounted) {
-                            setState(() {
-                              saved.labels = [_filterByLabel!];
-                            });
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Error saving note: $e')),
+                            );
                           }
                         }
-                      }
-                    } catch (e) {
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Error saving note: $e')),
-                        );
-                      }
-                    }
-                  },
-                  child: Text(
-                    existingNote == null ? 'Save Note' : 'Update Note',
-                    style: const TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.bold),
+                      },
+                      child: Text(
+                        existingNote == null ? 'Save Note' : 'Update Note',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
     );
   }
 }
@@ -2018,7 +2049,7 @@ class _IconAction extends StatelessWidget {
         decoration: BoxDecoration(
           color:
               active
-                  ? AppColors.accentPurple.withOpacity(0.2)
+                  ? AppColors.accentPurple.withValues(alpha: 0.2)
                   : AppColors.overlay08,
           borderRadius: BorderRadius.circular(AppRadius.small),
           border: Border.all(
@@ -2032,7 +2063,7 @@ class _IconAction extends StatelessWidget {
                   child: CircularProgressIndicator(
                     strokeWidth: 1.5,
                     valueColor: AlwaysStoppedAnimation<Color>(
-                      AppColors.accentPurple.withOpacity(0.8),
+                      AppColors.accentPurple.withValues(alpha: 0.8),
                     ),
                   ),
                 )

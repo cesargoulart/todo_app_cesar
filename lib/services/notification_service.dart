@@ -1,9 +1,6 @@
-﻿import 'dart:io' show Platform;
-
-import 'package:flutter/foundation.dart';
+﻿import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:local_notifier/local_notifier.dart';
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
@@ -98,19 +95,21 @@ class NotificationService {
     return defaultTargetPlatform == TargetPlatform.android ||
         defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.macOS ||
-        defaultTargetPlatform == TargetPlatform.linux;
+        defaultTargetPlatform == TargetPlatform.linux ||
+        defaultTargetPlatform == TargetPlatform.windows;
   }
 
-  // flutter_local_notifications has no Windows implementation at all, so
-  // Windows alerts are shown through local_notifier (native toast) instead.
-  bool get _isWindows => !kIsWeb && Platform.isWindows;
+  // On Windows every plugin call (cancel/zonedSchedule/pending…) is a
+  // synchronous FFI call that blocks the UI isolate (see
+  // https://github.com/MaikuB/flutter_local_notifications/issues/2730), so
+  // the number of native calls must be kept to a strict minimum there.
+  bool get _isWindows =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
+  bool get _isAndroid =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   Future<void> initialize() async {
-    if (_isWindows) {
-      await _initializeWindows();
-      return;
-    }
-
     try {
       if (!_isSupportedPlatform) {
         debugPrint(
@@ -131,9 +130,19 @@ class NotificationService {
             requestAlertPermission: true,
           );
 
+      const WindowsInitializationSettings windowsSettings =
+          WindowsInitializationSettings(
+            appName: 'Todo App Cesar',
+            appUserModelId: 'com.cesar.todoappcesar',
+            // Fixed GUID identifying this app to the Windows notification
+            // platform. Must never change between builds.
+            guid: '4f4e9a2b-8c3d-4a6e-9b1f-2d5c7e8a9f01',
+          );
+
       const InitializationSettings initSettings = InitializationSettings(
         android: androidSettings,
         iOS: iosSettings,
+        windows: windowsSettings,
       );
 
       await _notifications.initialize(
@@ -147,33 +156,6 @@ class NotificationService {
       await _requestPermissions();
     } catch (e, stackTrace) {
       debugPrint('Error initializing notifications: $e\n$stackTrace');
-    }
-  }
-
-  Future<void> _initializeWindows() async {
-    try {
-      await localNotifier.setup(
-        appName: 'Todo App Cesar',
-        shortcutPolicy: ShortcutPolicy.requireCreate,
-      );
-    } catch (e, stackTrace) {
-      debugPrint('Error initializing Windows notifications: $e\n$stackTrace');
-    }
-  }
-
-  /// Shows a native Windows toast immediately via local_notifier. There is no
-  /// OS-level scheduling on Windows (flutter_local_notifications does not
-  /// support this platform), so callers must invoke this at the moment the
-  /// alert should appear rather than scheduling it ahead of time.
-  Future<void> _showWindowsNotification({
-    required String title,
-    required String body,
-  }) async {
-    try {
-      final notification = LocalNotification(title: title, body: body);
-      await notification.show();
-    } catch (e, stackTrace) {
-      debugPrint('Error showing Windows notification: $e\n$stackTrace');
     }
   }
 
@@ -347,9 +329,16 @@ class NotificationService {
         details,
         payload: payload,
         androidScheduleMode: preferredMode,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
       );
+      debugPrint(
+        '🔔 Scheduled notification id=$id "$title" for $scheduledDate '
+        '(now=${_now()})',
+      );
+      if (kDebugMode) {
+        // Confirm the OS actually registered it (blocking call: debug only).
+        final pending = await _notifications.pendingNotificationRequests();
+        debugPrint('🔔 OS reports ${pending.length} pending notification(s)');
+      }
     } catch (e) {
       if (preferredMode == AndroidScheduleMode.inexactAllowWhileIdle) {
         rethrow;
@@ -366,8 +355,6 @@ class NotificationService {
         details,
         payload: payload,
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
       );
     }
   }
@@ -382,7 +369,13 @@ class NotificationService {
 
     try {
       final scheduledDate = _scheduledInstant(dueDate);
-      if (!scheduledDate.isAfter(_now())) return;
+      if (!scheduledDate.isAfter(_now())) {
+        debugPrint(
+          '🔔 Skipping due notification for "$taskTitle": '
+          '$scheduledDate is not in the future (now=${_now()})',
+        );
+        return;
+      }
 
       await _zonedScheduleWithFallback(
         id: _dueNotificationId(taskId),
@@ -427,6 +420,8 @@ class NotificationService {
     required Duration reminderBefore,
   }) async {
     if (!_isSupportedPlatform) return;
+    // Windows: keep only the due alert to minimise blocking native calls.
+    if (_isWindows) return;
 
     try {
       final reminderDate = dueDate.subtract(reminderBefore);
@@ -460,8 +455,58 @@ class NotificationService {
     }
   }
 
+  // Signature of the last rescheduled task set. Sync runs periodically and
+  // calls rescheduleNotificationsForTasks each time; when nothing relevant
+  // changed we skip the rebuild entirely (critical on Windows, where every
+  // plugin call blocks the UI isolate).
+  String? _lastScheduleSignature;
+
+  String _scheduleSignature(List<ToDoItem> tasks) {
+    final parts = <String>[];
+    for (final task in _flattenTasks(tasks)) {
+      final id = task.id;
+      final due = task.dueDate;
+      if (id == null || due == null) continue;
+      parts.add('$id|${due.millisecondsSinceEpoch}|${task.isDone}');
+    }
+    parts.sort();
+    return parts.join(';');
+  }
+
   /// Rebuild scheduled notifications for all known tasks.
   Future<void> rescheduleNotificationsForTasks(List<ToDoItem> tasks) async {
+    if (!_isSupportedPlatform) return;
+
+    final signature = _scheduleSignature(tasks);
+    if (signature == _lastScheduleSignature) return;
+    _lastScheduleSignature = signature;
+
+    if (_isWindows) {
+      // Full rebuild: one cancelAll() (does not block, unlike per-id
+      // cancels) and a single due alert per pending task.
+      try {
+        await _notifications.cancelAll();
+      } catch (e) {
+        debugPrint('Error cancelling notifications on Windows: $e');
+      }
+      final now = DateTime.now();
+      for (final task in _flattenTasks(tasks)) {
+        final dueDate = task.dueDate;
+        if (task.id == null ||
+            task.isDone ||
+            dueDate == null ||
+            !dueDate.isAfter(now)) {
+          continue;
+        }
+        await scheduleTaskDueNotification(
+          taskId: task.id!,
+          taskTitle: task.title,
+          dueDate: dueDate,
+        );
+      }
+      return;
+    }
+
     for (final task in _flattenTasks(tasks)) {
       if (task.id == null) continue;
 
@@ -505,13 +550,6 @@ class NotificationService {
   Future<void> showTaskCompletedNotification({
     required String taskTitle,
   }) async {
-    if (_isWindows) {
-      await _showWindowsNotification(
-        title: 'Task Completed',
-        body: 'Great job! You completed "$taskTitle"',
-      );
-      return;
-    }
     if (!_isSupportedPlatform) return;
 
     try {
@@ -550,13 +588,6 @@ class NotificationService {
     required String taskTitle,
     required bool isOverdue,
   }) async {
-    if (_isWindows) {
-      await _showWindowsNotification(
-        title: isOverdue ? 'Task Overdue' : 'Task Due Now',
-        body: 'Task "$taskTitle" ${isOverdue ? 'is overdue' : 'is due now'}',
-      );
-      return;
-    }
     if (!_isSupportedPlatform) return;
 
     try {
@@ -604,6 +635,13 @@ class NotificationService {
     if (!_isSupportedPlatform) return;
 
     await _notifications.cancel(_dueNotificationId(taskId));
+
+    if (_isWindows) {
+      // Only the due alert is scheduled on Windows, and every cancel() is a
+      // blocking native call there — skip the rest.
+      return;
+    }
+
     await _notifications.cancel(
       _reminderNotificationId(taskId, const Duration(hours: 1)),
     );
@@ -614,9 +652,11 @@ class NotificationService {
     await _notifications.cancel(_deadlineNotificationId(taskId, true));
     await _notifications.cancel(_dueNotificationId('${taskId}_snooze'));
 
-    // Legacy IDs used by older builds. String.hashCode is not stable across
-    // app versions, but cancelling the current runtime values still helps
-    // avoid duplicates for users upgrading from those builds.
+    if (!_isAndroid) return;
+
+    // Legacy IDs used by older Android builds. String.hashCode is not stable
+    // across app versions, but cancelling the current runtime values still
+    // helps avoid duplicates for users upgrading from those builds.
     await _notifications.cancel(taskId.hashCode);
     await _notifications.cancel('${taskId}_r60'.hashCode);
     await _notifications.cancel('${taskId}_r1440'.hashCode);
@@ -634,13 +674,6 @@ class NotificationService {
 
   /// Show a test notification immediately.
   Future<void> showTestNotification() async {
-    if (_isWindows) {
-      await _showWindowsNotification(
-        title: 'Test Notification',
-        body: 'This is a test notification from your Todo app!',
-      );
-      return;
-    }
     if (!_isSupportedPlatform) return;
 
     try {
@@ -675,16 +708,6 @@ class NotificationService {
 
   /// Schedule a test notification a few seconds from now.
   Future<void> scheduleTestNotification({int secondsFromNow = 5}) async {
-    if (_isWindows) {
-      // No OS-level scheduling on Windows; emulate it with a delayed show.
-      Future.delayed(Duration(seconds: secondsFromNow), () {
-        _showWindowsNotification(
-          title: 'Scheduled Test',
-          body: 'This scheduled notification worked!',
-        );
-      });
-      return;
-    }
     if (!_isSupportedPlatform) return;
 
     try {

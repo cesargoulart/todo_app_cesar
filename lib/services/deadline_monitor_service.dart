@@ -1,21 +1,18 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../models/todo_item.dart';
 import 'notification_service.dart';
 
-/// On Android/iOS/macOS/Linux, due/overdue alerts are handled entirely by the
-/// scheduled system notification (with Snooze/Done action buttons), which
-/// fires on time even when the app is closed.
+/// Due/overdue alerts are handled by scheduled system notifications on every
+/// supported platform, including Windows (flutter_local_notifications v19+
+/// schedules native Windows toasts at OS level, so they fire even when the
+/// app is closed).
 ///
-/// flutter_local_notifications has no Windows implementation, so there is no
-/// OS-level scheduling available there. This service fills that gap on
-/// Windows only: it polls the in-memory task list on a timer and fires a
-/// native toast (via NotificationService, backed by local_notifier) the
-/// moment a task's due date is reached. This only works while the app
-/// process is running — Windows has no background alarm mechanism here.
+/// This polling service is therefore inactive and kept only for API
+/// compatibility with existing call sites. Re-enable `_isActive` if a
+/// platform without OS-level scheduling needs a foreground fallback again.
 class DeadlineMonitorService {
   static final DeadlineMonitorService _instance =
       DeadlineMonitorService._internal();
@@ -36,8 +33,9 @@ class DeadlineMonitorService {
   // new future due date automatically re-arms the alert without extra hooks.
   final Map<String, DateTime> _alertedDueDates = {};
 
-  bool get _isActive =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+  // Scheduled OS notifications now cover Windows too; polling would create
+  // duplicate toasts, so this stays disabled.
+  bool get _isActive => false;
 
   void initialize(BuildContext context) {}
 

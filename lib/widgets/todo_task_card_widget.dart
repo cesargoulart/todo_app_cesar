@@ -169,7 +169,7 @@ class _TodoTaskCardWidgetState extends State<TodoTaskCardWidget>
                     end: Alignment.bottomCenter,
                     colors: [
                       _accentColor,
-                      _accentColor.withOpacity(0.4),
+                      _accentColor.withValues(alpha: 0.4),
                     ],
                   ),
                 ),
@@ -256,7 +256,7 @@ class _TodoTaskCardWidgetState extends State<TodoTaskCardWidget>
                                   horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
                                 color: AppColors.accentPurple
-                                    .withOpacity(0.2),
+                                    .withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(
                                     AppRadius.badge),
                               ),
@@ -454,10 +454,10 @@ class _TodoTaskCardWidgetState extends State<TodoTaskCardWidget>
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: AppColors.accentRed.withOpacity(0.15),
+        color: AppColors.accentRed.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(
-            color: AppColors.accentRed.withOpacity(0.35)),
+            color: AppColors.accentRed.withValues(alpha: 0.35)),
       ),
       alignment: Alignment.centerRight,
       padding: const EdgeInsets.only(right: 20),
@@ -530,7 +530,7 @@ class _LabelChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.2),
+        color: color.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(AppRadius.badge),
       ),
       child: Text(

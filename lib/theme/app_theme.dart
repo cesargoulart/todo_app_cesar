@@ -73,7 +73,7 @@ class AppShadows {
   // Glow shadow for the FAB
   static List<BoxShadow> fabGlow = [
     BoxShadow(
-      color: AppColors.accentPurple.withOpacity(0.55),
+      color: AppColors.accentPurple.withValues(alpha: 0.55),
       blurRadius: 20,
       offset: const Offset(0, 8),
     ),
@@ -82,7 +82,7 @@ class AppShadows {
   // Subtle card elevation
   static List<BoxShadow> card = [
     BoxShadow(
-      color: Colors.black.withOpacity(0.25),
+      color: Colors.black.withValues(alpha: 0.25),
       blurRadius: 8,
       offset: const Offset(0, 4),
     ),

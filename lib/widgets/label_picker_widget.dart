@@ -201,8 +201,8 @@ class _LabelPickerWidgetState extends State<LabelPickerWidget> {
                     label: Text(label.name),
                     selected: isSelected,
                     onSelected: (_) => _toggleLabel(label),
-                    backgroundColor: _parseColor(label.color).withOpacity(0.2),
-                    selectedColor: _parseColor(label.color).withOpacity(0.6),
+                    backgroundColor: _parseColor(label.color).withValues(alpha: 0.2),
+                    selectedColor: _parseColor(label.color).withValues(alpha: 0.6),
                     checkmarkColor: Colors.white,
                     labelStyle: TextStyle(
                       color: Colors.white,

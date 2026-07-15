@@ -126,14 +126,14 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> with SingleTick
             margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             elevation: widget.todo.isDone ? 1 : 3,
             shadowColor: Theme.of(context).brightness == Brightness.dark
-                ? Colors.black.withOpacity(0.5)
-                : Theme.of(context).primaryColor.withOpacity(0.2),
+                ? Colors.black.withValues(alpha: 0.5)
+                : Theme.of(context).primaryColor.withValues(alpha: 0.2),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
               side: BorderSide(
                 color: widget.todo.isDone
                     ? Colors.transparent
-                    : Theme.of(context).primaryColor.withOpacity(0.1),
+                    : Theme.of(context).primaryColor.withValues(alpha: 0.1),
                 width: 1,
               ),
             ),
@@ -148,11 +148,11 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> with SingleTick
                         colors: Theme.of(context).brightness == Brightness.dark
                             ? [
                                 const Color(0xFF1E293B),
-                                const Color(0xFF1E293B).withOpacity(0.95),
+                                const Color(0xFF1E293B).withValues(alpha: 0.95),
                               ]
                             : [
                                 Colors.white,
-                                Colors.white.withOpacity(0.95),
+                                Colors.white.withValues(alpha: 0.95),
                               ],
                       ),
               ),
@@ -165,7 +165,7 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> with SingleTick
                       if (todo.subtasks.isNotEmpty)
                         Container(
                           decoration: BoxDecoration(
-                            color: Theme.of(context).primaryColor.withOpacity(0.1),
+                            color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: IconButton(
@@ -363,7 +363,7 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> with SingleTick
                     children: [
                       Container(
                         decoration: BoxDecoration(
-                          color: Theme.of(context).primaryColor.withOpacity(0.1),
+                          color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: IconButton(
@@ -377,7 +377,7 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> with SingleTick
                       const SizedBox(width: 4),
                       Container(
                         decoration: BoxDecoration(
-                          color: Colors.blue.withOpacity(0.1),
+                          color: Colors.blue.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: IconButton(
@@ -389,7 +389,7 @@ class _ToDoListItemWidgetState extends State<ToDoListItemWidget> with SingleTick
                       const SizedBox(width: 4),
                       Container(
                         decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.1),
+                          color: Colors.red.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: IconButton(
