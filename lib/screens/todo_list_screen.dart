@@ -55,7 +55,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
   bool _showCompleted = false;
   bool _hideFutureTasks = true;
   bool _showOnlyTasksWithShowOnDueDate = false;
-  bool _hideCremesTasks = true;
+  bool _showOverdueTasks = false;
   Label? _filterByLabel;
   TodoFilter _activeFilter = TodoFilter.all;
 
@@ -74,6 +74,34 @@ class _ToDoListScreenState extends State<ToDoListScreen>
       return name == 'aniversario' || name == 'aniversarios';
     });
   }
+
+  // Recognises the "Medico" (medication) label by name, ignoring case/accents.
+  bool _isMedicoLabelName(String value) {
+    final name = _normalizeLabelName(value);
+    return name == 'medico' ||
+        name == 'medica' ||
+        name == 'medicos' ||
+        name == 'medicas';
+  }
+
+  bool _hasMedicoLabel(List<Label> labels) {
+    return labels.any((label) => _isMedicoLabelName(label.name));
+  }
+
+  // The medication UI (hourly repeat) is shown when the task carries the Medico
+  // label, or when the task is being created/edited inside the Medico filter.
+  bool _isMedicoContext(List<Label> selectedLabels) {
+    return _hasMedicoLabel(selectedLabels) ||
+        (_filterByLabel != null && _isMedicoLabelName(_filterByLabel!.name));
+  }
+
+  // The four hourly repeat options offered for medication tasks.
+  static const List<RecurrenceInterval> _medicoIntervals = [
+    RecurrenceInterval.hourly6,
+    RecurrenceInterval.hourly8,
+    RecurrenceInterval.hourly12,
+    RecurrenceInterval.hourly24,
+  ];
 
   String _normalizeLabelName(String value) {
     return value
@@ -178,6 +206,19 @@ class _ToDoListScreenState extends State<ToDoListScreen>
               )
               .toList();
     }
+    // Medication tasks only show inside the Medico label, never in "Show All".
+    if (_filterByLabel == null || !_isMedicoLabelName(_filterByLabel!.name)) {
+      filtered = filtered.where((t) => !_hasMedicoLabel(t.labels)).toList();
+    }
+    // Cremes tasks only show inside the Cremes label, never in "Show All".
+    if (_filterByLabel?.name.toLowerCase() != 'cremes') {
+      filtered =
+          filtered
+              .where(
+                (t) => !t.labels.any((l) => l.name.toLowerCase() == 'cremes'),
+              )
+              .toList();
+    }
 
     // Hide completed
     if (!_showCompleted) {
@@ -211,12 +252,13 @@ class _ToDoListScreenState extends State<ToDoListScreen>
           }).toList();
     }
 
-    // Hide Cremes
-    if (_hideCremesTasks) {
+    // Show only overdue tasks (due date already passed, not completed)
+    if (_showOverdueTasks) {
       filtered =
           filtered
               .where(
-                (t) => !t.labels.any((l) => l.name.toLowerCase() == 'cremes'),
+                (t) =>
+                    !t.isDone && t.dueDate != null && t.dueDate!.isBefore(now),
               )
               .toList();
     }
@@ -592,8 +634,24 @@ class _ToDoListScreenState extends State<ToDoListScreen>
         existingTodo?.recurrenceInterval ?? RecurrenceInterval.none;
     DateTime? recurrenceEndDate = existingTodo?.recurrenceEndDate;
     List<Label> selectedLabels = List.from(existingTodo?.labels ?? []);
+    // When creating a task inside the Medico filter, tag it with that label so
+    // it shows up there and gets the medication (hourly repeat) UI.
+    if (!isEditing &&
+        _filterByLabel != null &&
+        _isMedicoLabelName(_filterByLabel!.name) &&
+        !_hasMedicoLabel(selectedLabels)) {
+      selectedLabels.add(_filterByLabel!);
+    }
+    // New medication tasks default to an 8-hour repeating schedule so that
+    // marking them "done" simply advances the next dose.
+    if (!isEditing && _isMedicoContext(selectedLabels) && !isRecurring) {
+      isRecurring = true;
+      recurrenceInterval = RecurrenceInterval.hourly8;
+    }
     bool isNotesExpanded = false;
-    List<int> selectedWeekdays = List.from(existingTodo?.selectedWeekdays ?? []);
+    List<int> selectedWeekdays = List.from(
+      existingTodo?.selectedWeekdays ?? [],
+    );
 
     showDialog(
       context: context,
@@ -645,17 +703,34 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                       if (newTitle.isNotEmpty) {
                                         try {
                                           if (isEditing) {
+                                            // Whether the hourly schedule was
+                                            // just (re)chosen — if so, saving
+                                            // schedules the next dose from now.
+                                            final bool rescheduleHourly =
+                                                isRecurring &&
+                                                recurrenceInterval.hours !=
+                                                    null &&
+                                                existingTodo
+                                                        .recurrenceInterval !=
+                                                    recurrenceInterval;
                                             existingTodo.title = newTitle;
                                             existingTodo.notes =
                                                 _notesFieldController.text
                                                         .trim()
                                                         .isEmpty
                                                     ? null
-                                                    : _notesFieldController
-                                                        .text
+                                                    : _notesFieldController.text
                                                         .trim();
                                             existingTodo.dueDate =
-                                                selectedDueDate;
+                                                rescheduleHourly
+                                                    ? DateTime.now().add(
+                                                      Duration(
+                                                        hours:
+                                                            recurrenceInterval
+                                                                .hours!,
+                                                      ),
+                                                    )
+                                                    : selectedDueDate;
                                             existingTodo.showOnlyOnDueDate =
                                                 showOnlyOnDueDate;
                                             existingTodo.isRecurring =
@@ -672,8 +747,8 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                                             RecurrenceInterval
                                                                 .weekdays
                                                     ? List.from(
-                                                        selectedWeekdays,
-                                                      )
+                                                      selectedWeekdays,
+                                                    )
                                                     : [];
                                             existingTodo.labels =
                                                 selectedLabels;
@@ -683,13 +758,15 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                                 recurrenceInterval ==
                                                     RecurrenceInterval
                                                         .weekdays &&
-                                                existingTodo.selectedWeekdays
+                                                existingTodo
+                                                    .selectedWeekdays
                                                     .isNotEmpty &&
                                                 existingTodo.dueDate != null) {
-                                              existingTodo.dueDate = existingTodo
+                                              existingTodo.dueDate =
+                                                  existingTodo
                                                       .firstSelectedWeekdayOnOrAfter(
-                                                          existingTodo
-                                                              .dueDate!) ??
+                                                        existingTodo.dueDate!,
+                                                      ) ??
                                                   existingTodo.dueDate;
                                             }
                                             if (isRecurring &&
@@ -701,11 +778,8 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                               existingTodo.nextOccurrenceDate =
                                                   null;
                                             }
-                                            final updated =
-                                                await _syncService
-                                                    .saveTodoSafely(
-                                              existingTodo,
-                                            );
+                                            final updated = await _syncService
+                                                .saveTodoSafely(existingTodo);
                                             await _updateTaskLabels(
                                               updated.id!,
                                               selectedLabels,
@@ -734,13 +808,14 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                           } else {
                                             final newTodo = ToDoItem(
                                               title: newTitle,
-                                              notes: _notesFieldController
-                                                      .text
-                                                      .trim()
-                                                      .isEmpty
-                                                  ? null
-                                                  : _notesFieldController.text
-                                                      .trim(),
+                                              notes:
+                                                  _notesFieldController.text
+                                                          .trim()
+                                                          .isEmpty
+                                                      ? null
+                                                      : _notesFieldController
+                                                          .text
+                                                          .trim(),
                                               dueDate: selectedDueDate,
                                               showOnlyOnDueDate:
                                                   showOnlyOnDueDate,
@@ -757,8 +832,8 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                                               RecurrenceInterval
                                                                   .weekdays
                                                       ? List.from(
-                                                          selectedWeekdays,
-                                                        )
+                                                        selectedWeekdays,
+                                                      )
                                                       : [],
                                             );
                                             // Snap the due date onto the first
@@ -767,13 +842,30 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                                 recurrenceInterval ==
                                                     RecurrenceInterval
                                                         .weekdays &&
-                                                newTodo.selectedWeekdays
+                                                newTodo
+                                                    .selectedWeekdays
                                                     .isNotEmpty &&
                                                 newTodo.dueDate != null) {
-                                              newTodo.dueDate = newTodo
+                                              newTodo.dueDate =
+                                                  newTodo
                                                       .firstSelectedWeekdayOnOrAfter(
-                                                          newTodo.dueDate!) ??
+                                                        newTodo.dueDate!,
+                                                      ) ??
                                                   newTodo.dueDate;
+                                            }
+                                            // For an hourly (medication)
+                                            // schedule, saving sets the next
+                                            // dose to now + the chosen hours.
+                                            if (isRecurring &&
+                                                recurrenceInterval.hours !=
+                                                    null) {
+                                              newTodo
+                                                  .dueDate = DateTime.now().add(
+                                                Duration(
+                                                  hours:
+                                                      recurrenceInterval.hours!,
+                                                ),
+                                              );
                                             }
                                             if (isRecurring &&
                                                 newTodo.dueDate != null) {
@@ -790,9 +882,8 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                               // The sync service already adds the subtask
                                               // to the parent in the cache and notifies the UI
                                             } else {
-                                              final saved =
-                                                  await _syncService
-                                                      .saveTodoSafely(newTodo);
+                                              final saved = await _syncService
+                                                  .saveTodoSafely(newTodo);
                                               await _updateTaskLabels(
                                                 saved.id!,
                                                 selectedLabels,
@@ -1061,7 +1152,9 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                   if (recurrenceInterval ==
                                       RecurrenceInterval.none) {
                                     recurrenceInterval =
-                                        RecurrenceInterval.weekly;
+                                        _isMedicoContext(selectedLabels)
+                                            ? RecurrenceInterval.hourly8
+                                            : RecurrenceInterval.weekly;
                                   }
                                   selectedDueDate ??= DateTime.now();
                                 }
@@ -1070,72 +1163,141 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                           ),
                           if (isRecurring) ...[
                             const SizedBox(height: 12),
-                            DropdownButtonFormField<RecurrenceInterval>(
-                              value:
-                                  recurrenceInterval == RecurrenceInterval.none
-                                      ? RecurrenceInterval.weekly
-                                      : recurrenceInterval,
-                              dropdownColor: AppColors.bgSurface,
-                              style: const TextStyle(
-                                color: AppColors.textPrimary,
-                              ),
-                              decoration: InputDecoration(
-                                labelText: 'Repeat every',
-                                labelStyle: const TextStyle(
-                                  color: AppColors.textSecondary,
-                                ),
-                                filled: true,
-                                fillColor: AppColors.overlay08,
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(
-                                    AppRadius.button,
-                                  ),
-                                  borderSide: const BorderSide(
-                                    color: AppColors.borderCard,
-                                  ),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(
-                                    AppRadius.button,
-                                  ),
-                                  borderSide: const BorderSide(
-                                    color: AppColors.borderCard,
-                                  ),
-                                ),
-                              ),
-                              items:
-                                  [
-                                        RecurrenceInterval.daily,
-                                        RecurrenceInterval.weekly,
-                                        RecurrenceInterval.monthly,
-                                        RecurrenceInterval.yearly,
-                                        RecurrenceInterval.weekdays,
-                                      ]
-                                      .map(
-                                        (i) => DropdownMenuItem(
-                                          value: i,
-                                          child: Text(i.displayName),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: DropdownButtonFormField<
+                                    RecurrenceInterval
+                                  >(
+                                    value:
+                                        _isMedicoContext(selectedLabels)
+                                            ? (_medicoIntervals.contains(
+                                                  recurrenceInterval,
+                                                )
+                                                ? recurrenceInterval
+                                                : RecurrenceInterval.hourly8)
+                                            : (recurrenceInterval ==
+                                                        RecurrenceInterval
+                                                            .none ||
+                                                    recurrenceInterval.hours !=
+                                                        null
+                                                ? RecurrenceInterval.weekly
+                                                : recurrenceInterval),
+                                    dropdownColor: AppColors.bgSurface,
+                                    style: const TextStyle(
+                                      color: AppColors.textPrimary,
+                                    ),
+                                    decoration: InputDecoration(
+                                      labelText: 'Repeat every',
+                                      labelStyle: const TextStyle(
+                                        color: AppColors.textSecondary,
+                                      ),
+                                      filled: true,
+                                      fillColor: AppColors.overlay08,
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(
+                                          AppRadius.button,
                                         ),
-                                      )
-                                      .toList(),
-                              onChanged:
-                                  (v) => setDs(
-                                    () {
-                                      recurrenceInterval =
-                                          v ?? RecurrenceInterval.weekly;
-                                      if (recurrenceInterval ==
-                                          RecurrenceInterval.weekdays) {
-                                        if (selectedDueDate != null &&
-                                            selectedWeekdays.isEmpty) {
-                                          selectedWeekdays = [
-                                            selectedDueDate!.weekday,
-                                          ];
-                                        }
-                                      } else {
-                                        selectedWeekdays = [];
-                                      }
-                                    },
+                                        borderSide: const BorderSide(
+                                          color: AppColors.borderCard,
+                                        ),
+                                      ),
+                                      enabledBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(
+                                          AppRadius.button,
+                                        ),
+                                        borderSide: const BorderSide(
+                                          color: AppColors.borderCard,
+                                        ),
+                                      ),
+                                    ),
+                                    items:
+                                        (_isMedicoContext(selectedLabels)
+                                                ? _medicoIntervals
+                                                : const [
+                                                  RecurrenceInterval.daily,
+                                                  RecurrenceInterval.weekly,
+                                                  RecurrenceInterval.monthly,
+                                                  RecurrenceInterval.yearly,
+                                                  RecurrenceInterval.weekdays,
+                                                ])
+                                            .map(
+                                              (i) => DropdownMenuItem(
+                                                value: i,
+                                                child: Text(i.displayName),
+                                              ),
+                                            )
+                                            .toList(),
+                                    onChanged:
+                                        (v) => setDs(() {
+                                          recurrenceInterval =
+                                              v ??
+                                              (_isMedicoContext(selectedLabels)
+                                                  ? RecurrenceInterval.hourly8
+                                                  : RecurrenceInterval.weekly);
+                                          if (recurrenceInterval ==
+                                              RecurrenceInterval.weekdays) {
+                                            if (selectedDueDate != null &&
+                                                selectedWeekdays.isEmpty) {
+                                              selectedWeekdays = [
+                                                selectedDueDate!.weekday,
+                                              ];
+                                            }
+                                          } else {
+                                            selectedWeekdays = [];
+                                          }
+                                        }),
                                   ),
+                                ),
+                                if (_isMedicoContext(selectedLabels)) ...[
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Builder(
+                                      builder: (_) {
+                                        final h =
+                                            (_medicoIntervals.contains(
+                                                      recurrenceInterval,
+                                                    )
+                                                    ? recurrenceInterval
+                                                    : RecurrenceInterval
+                                                        .hourly8)
+                                                .hours!;
+                                        return Container(
+                                          height: 56,
+                                          decoration: BoxDecoration(
+                                            gradient: AppGradients.primary,
+                                            borderRadius: BorderRadius.circular(
+                                              AppRadius.button,
+                                            ),
+                                          ),
+                                          child: TextButton.icon(
+                                            icon: const Icon(
+                                              Icons.more_time,
+                                              color: Colors.white,
+                                              size: 18,
+                                            ),
+                                            label: Text(
+                                              '+${h}H',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                              ),
+                                            ),
+                                            onPressed:
+                                                () => setDs(() {
+                                                  final base =
+                                                      selectedDueDate ??
+                                                      DateTime.now();
+                                                  selectedDueDate = base.add(
+                                                    Duration(hours: h),
+                                                  );
+                                                }),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                             if (recurrenceInterval ==
                                 RecurrenceInterval.weekdays) ...[
@@ -1191,28 +1353,30 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                       height: 36,
                                       alignment: Alignment.center,
                                       decoration: BoxDecoration(
-                                        color: isSelected
-                                            ? AppColors.accentPurple
-                                            : AppColors.overlay08,
-                                        borderRadius: BorderRadius.circular(
-                                          18,
-                                        ),
+                                        color:
+                                            isSelected
+                                                ? AppColors.accentPurple
+                                                : AppColors.overlay08,
+                                        borderRadius: BorderRadius.circular(18),
                                         border: Border.all(
-                                          color: isSelected
-                                              ? AppColors.accentPurple
-                                              : AppColors.borderCard,
+                                          color:
+                                              isSelected
+                                                  ? AppColors.accentPurple
+                                                  : AppColors.borderCard,
                                           width: 1,
                                         ),
                                       ),
                                       child: Text(
                                         labels[i],
                                         style: TextStyle(
-                                          color: isSelected
-                                              ? Colors.white
-                                              : AppColors.textPrimary,
-                                          fontWeight: isSelected
-                                              ? FontWeight.bold
-                                              : FontWeight.normal,
+                                          color:
+                                              isSelected
+                                                  ? Colors.white
+                                                  : AppColors.textPrimary,
+                                          fontWeight:
+                                              isSelected
+                                                  ? FontWeight.bold
+                                                  : FontWeight.normal,
                                           fontSize: 13,
                                         ),
                                       ),
@@ -1311,6 +1475,28 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                   recurrenceInterval =
                                       RecurrenceInterval.yearly;
                                   selectedDueDate ??= DateTime.now();
+                                }
+
+                                // Keep the recurrence in sync with the Medico
+                                // label so the saved value matches the UI: an
+                                // hourly schedule inside the medication context,
+                                // and never an hourly one outside of it.
+                                if (!isSubtask) {
+                                  final medico = _isMedicoContext(labels);
+                                  if (medico &&
+                                      !_medicoIntervals.contains(
+                                        recurrenceInterval,
+                                      )) {
+                                    isRecurring = true;
+                                    recurrenceInterval =
+                                        RecurrenceInterval.hourly8;
+                                    selectedWeekdays = [];
+                                    selectedDueDate ??= DateTime.now();
+                                  } else if (!medico &&
+                                      recurrenceInterval.hours != null) {
+                                    recurrenceInterval =
+                                        RecurrenceInterval.weekly;
+                                  }
                                 }
                               }),
                         ),
@@ -1610,7 +1796,6 @@ class _ToDoListScreenState extends State<ToDoListScreen>
               onTap: () {
                 setState(() {
                   _filterByLabel = null;
-                  _hideCremesTasks = true;
                 });
                 Navigator.pop(context);
               },
@@ -1653,9 +1838,6 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                             ),
                             onTap: () {
                               setState(() {
-                                if (label.name.toLowerCase() == 'cremes') {
-                                  _hideCremesTasks = false;
-                                }
                                 _filterByLabel = isSelected ? null : label;
                               });
                               Navigator.pop(context);
@@ -1819,11 +2001,15 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                 ),
                 const SizedBox(width: 8),
                 _IconAction(
-                  icon: _hideCremesTasks ? Icons.spa : Icons.spa_outlined,
-                  active: _hideCremesTasks,
+                  icon:
+                      _showOverdueTasks
+                          ? Icons.history
+                          : Icons.history_toggle_off,
+                  active: _showOverdueTasks,
                   onTap:
-                      () =>
-                          setState(() => _hideCremesTasks = !_hideCremesTasks),
+                      () => setState(
+                        () => _showOverdueTasks = !_showOverdueTasks,
+                      ),
                 ),
                 const SizedBox(width: 8),
                 _IconAction(

@@ -8,7 +8,12 @@ enum RecurrenceInterval {
   weekly('weekly'),
   monthly('monthly'),
   yearly('yearly'),
-  weekdays('weekdays');
+  weekdays('weekdays'),
+  // Hourly intervals, used for medication (label "Medico") tasks.
+  hourly6('hourly6'),
+  hourly8('hourly8'),
+  hourly12('hourly12'),
+  hourly24('hourly24');
 
   const RecurrenceInterval(this.value);
   final String value;
@@ -25,8 +30,32 @@ enum RecurrenceInterval {
         return RecurrenceInterval.yearly;
       case 'weekdays':
         return RecurrenceInterval.weekdays;
+      case 'hourly6':
+        return RecurrenceInterval.hourly6;
+      case 'hourly8':
+        return RecurrenceInterval.hourly8;
+      case 'hourly12':
+        return RecurrenceInterval.hourly12;
+      case 'hourly24':
+        return RecurrenceInterval.hourly24;
       default:
         return RecurrenceInterval.none;
+    }
+  }
+
+  // For hourly intervals, the number of hours to advance on each occurrence.
+  int? get hours {
+    switch (this) {
+      case RecurrenceInterval.hourly6:
+        return 6;
+      case RecurrenceInterval.hourly8:
+        return 8;
+      case RecurrenceInterval.hourly12:
+        return 12;
+      case RecurrenceInterval.hourly24:
+        return 24;
+      default:
+        return null;
     }
   }
 
@@ -44,6 +73,14 @@ enum RecurrenceInterval {
         return 'Yearly';
       case RecurrenceInterval.weekdays:
         return 'Weekday';
+      case RecurrenceInterval.hourly6:
+        return '6H';
+      case RecurrenceInterval.hourly8:
+        return '8H';
+      case RecurrenceInterval.hourly12:
+        return '12H';
+      case RecurrenceInterval.hourly24:
+        return '24H';
     }
   }
 }
@@ -221,6 +258,11 @@ class ToDoItem {
           next = next.add(const Duration(days: 1));
         }
         return null;
+      case RecurrenceInterval.hourly6:
+      case RecurrenceInterval.hourly8:
+      case RecurrenceInterval.hourly12:
+      case RecurrenceInterval.hourly24:
+        return currentDate.add(Duration(hours: recurrenceInterval.hours!));
       case RecurrenceInterval.none:
         return null;
     }
