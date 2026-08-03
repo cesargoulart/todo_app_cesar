@@ -227,6 +227,11 @@ class DatabaseSyncService {
     return await wrapUserOperation(() async {
       final savedTodo = await _supabaseService.saveTodo(todo);
 
+      // Labels live in todo_task_labels and are therefore absent from the
+      // todo_cesar upsert response. Preserve them in the local cache so a
+      // labelled task cannot temporarily appear in the wrong filtered view.
+      savedTodo.labels = List.of(todo.labels);
+
       if (savedTodo.parentId != null) {
         // It's a subtask — add it to its parent in the cache, not as top-level
         final parentIndex = _currentTodos.indexWhere(

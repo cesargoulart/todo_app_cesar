@@ -1,11 +1,11 @@
 {
-    "name": "todo_app_cesar",
-    "short_name": "todo_app_cesar",
+    "name": "My Tasks",
+    "short_name": "My Tasks",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Organize tarefas, prazos e lembretes.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

@@ -209,6 +209,20 @@ class _ToDoListScreenState extends State<ToDoListScreen>
     // Medication tasks only show inside the Medico label, never in "Show All".
     if (_filterByLabel == null || !_isMedicoLabelName(_filterByLabel!.name)) {
       filtered = filtered.where((t) => !_hasMedicoLabel(t.labels)).toList();
+    } else {
+      // After a recurring dose is checked, keep it hidden until its newly
+      // scheduled due time. It then becomes visible again for the next dose.
+      filtered =
+          filtered.where((t) {
+            final dueDate = t.dueDate;
+            final isWaitingForNextDose =
+                _hasMedicoLabel(t.labels) &&
+                !t.isDone &&
+                t.completedAt != null &&
+                dueDate != null &&
+                dueDate.isAfter(now);
+            return !isWaitingForNextDose;
+          }).toList();
     }
     // Cremes tasks only show inside the Cremes label, never in "Show All".
     if (_filterByLabel?.name.toLowerCase() != 'cremes') {
@@ -458,12 +472,17 @@ class _ToDoListScreenState extends State<ToDoListScreen>
     final originalCompletedAt = todo.completedAt;
     final originalDueDate = todo.dueDate;
     final originalNextOccurrence = todo.nextOccurrenceDate;
+    final isMedicoTask = _hasMedicoLabel(todo.labels);
 
     // Completing a recurring task advances its due date to the next chosen day
     // instead of marking it permanently done — unless we've passed the end date.
     DateTime? advancedDueDate;
     if (!todo.isDone && todo.isRecurring) {
-      final next = todo.calculateNextOccurrence();
+      final hourlyInterval = todo.recurrenceInterval.hours;
+      final next =
+          isMedicoTask && hourlyInterval != null
+              ? DateTime.now().add(Duration(hours: hourlyInterval))
+              : todo.calculateNextOccurrence();
       if (next != null &&
           (todo.recurrenceEndDate == null ||
               !next.isAfter(todo.recurrenceEndDate!))) {
@@ -476,7 +495,9 @@ class _ToDoListScreenState extends State<ToDoListScreen>
         todo.dueDate = advancedDueDate;
         todo.nextOccurrenceDate = todo.calculateNextOccurrence();
         todo.isDone = false;
-        todo.completedAt = null;
+        // For medication tasks this records that the current dose was taken;
+        // the filter hides it until [dueDate] for the next dose.
+        todo.completedAt = isMedicoTask ? DateTime.now() : null;
       } else {
         todo.isDone = !todo.isDone;
         todo.completedAt = todo.isDone ? DateTime.now() : null;
@@ -1284,12 +1305,10 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                             ),
                                             onPressed:
                                                 () => setDs(() {
-                                                  final base =
-                                                      selectedDueDate ??
-                                                      DateTime.now();
-                                                  selectedDueDate = base.add(
-                                                    Duration(hours: h),
-                                                  );
+                                                  selectedDueDate =
+                                                      DateTime.now().add(
+                                                        Duration(hours: h),
+                                                      );
                                                 }),
                                           ),
                                         );

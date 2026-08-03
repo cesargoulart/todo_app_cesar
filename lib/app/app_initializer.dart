@@ -6,15 +6,13 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../supabase_credentials.dart';
 import '../services/notification_service.dart';
-import '../services/auto_update_service.dart';
+import '../services/auto_update_service_web.dart'
+    if (dart.library.io) '../services/auto_update_service.dart';
 
 class AppInitializer {
   static Future<void> initialize() async {
     try {
-      await Supabase.initialize(
-        url: supabaseUrl,
-        anonKey: supabaseAnnonKey,
-      );
+      await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnnonKey);
       print('✅ Supabase initialized');
 
       await NotificationService().initialize();
