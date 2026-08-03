@@ -4,7 +4,8 @@
 // Mantém o main.dart limpo.
 
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../supabase_credentials.dart';
+import '../supabase_credentials_web.dart'
+    if (dart.library.io) '../supabase_credentials.dart';
 import '../services/notification_service.dart';
 import '../services/auto_update_service_web.dart'
     if (dart.library.io) '../services/auto_update_service.dart';
