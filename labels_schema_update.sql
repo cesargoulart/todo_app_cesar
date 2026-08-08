@@ -30,7 +30,8 @@ INSERT INTO todo_labels (name, color) VALUES
     ('Urgent', '#F44336'),
     ('Shopping', '#9C27B0'),
     ('Health', '#00BCD4'),
-    ('Study', '#FF9800')
+    ('Study', '#FF9800'),
+    ('Daily', '#2196F3')
 ON CONFLICT (name) DO NOTHING;
 
 -- Function to get tasks with their labels

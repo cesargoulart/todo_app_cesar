@@ -88,6 +88,15 @@ class _ToDoListScreenState extends State<ToDoListScreen>
     return labels.any((label) => _isMedicoLabelName(label.name));
   }
 
+  // Recognises the "Daily" label by name, ignoring case/accents.
+  bool _isDailyLabelName(String value) {
+    return _normalizeLabelName(value) == 'daily';
+  }
+
+  bool _hasDailyLabel(List<Label> labels) {
+    return labels.any((label) => _isDailyLabelName(label.name));
+  }
+
   // The medication UI (hourly repeat) is shown when the task carries the Medico
   // label, or when the task is being created/edited inside the Medico filter.
   bool _isMedicoContext(List<Label> selectedLabels) {
@@ -232,6 +241,20 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                 (t) => !t.labels.any((l) => l.name.toLowerCase() == 'cremes'),
               )
               .toList();
+    }
+    // Daily tasks only appear on their due date, starting 1 hour before the
+    // due time, unless the Daily label is explicitly selected.
+    if (_filterByLabel == null || !_isDailyLabelName(_filterByLabel!.name)) {
+      filtered =
+          filtered.where((t) {
+            if (!_hasDailyLabel(t.labels)) return true;
+            final dueDate = t.dueDate;
+            if (dueDate == null) return true;
+            final dueDay = DateTime(dueDate.year, dueDate.month, dueDate.day);
+            if (!dueDay.isAtSameMomentAs(today)) return false;
+            final visibleFrom = dueDate.subtract(const Duration(hours: 1));
+            return !now.isBefore(visibleFrom);
+          }).toList();
     }
 
     // Hide completed
