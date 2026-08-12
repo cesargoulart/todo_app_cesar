@@ -257,10 +257,8 @@ class _ToDoListScreenState extends State<ToDoListScreen>
           }).toList();
     }
 
-    // Hide completed
-    if (!_showCompleted) {
-      filtered = filtered.where((t) => !t.isDone).toList();
-    }
+    // Toggle between only-open and only-completed tasks
+    filtered = filtered.where((t) => t.isDone == _showCompleted).toList();
 
     // Hide future tasks (>3 days)
     if (_hideFutureTasks) {
@@ -320,11 +318,9 @@ class _ToDoListScreenState extends State<ToDoListScreen>
       });
     }
 
-    // When showing completed tasks, sort: pending first (by dueDate), then done (by completedAt desc)
+    // When showing completed tasks, sort by completedAt desc (most recent first)
     if (_showCompleted) {
-      final pending = filtered.where((t) => !t.isDone).toList();
-      final done = filtered.where((t) => t.isDone).toList();
-      done.sort((a, b) {
+      filtered.sort((a, b) {
         final aDate = a.completedAt;
         final bDate = b.completedAt;
         if (aDate == null && bDate == null) return 0;
@@ -332,7 +328,6 @@ class _ToDoListScreenState extends State<ToDoListScreen>
         if (bDate == null) return -1;
         return bDate.compareTo(aDate); // most recent first
       });
-      filtered = [...pending, ...done];
     }
 
     return filtered;
