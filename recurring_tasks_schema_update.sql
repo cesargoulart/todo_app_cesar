@@ -112,25 +112,42 @@ BEGIN
             -- Generate a new UUID for the new task instance
             new_task_uuid := gen_random_uuid();
 
-            -- Create a new task instance
+            -- Create a new task instance while preserving the original task
+            -- metadata that the app relies on for filtering and display.
             INSERT INTO todo_cesar (
                 id,
                 title,
+                body,
+                notes,
                 is_done,
                 due_date,
+                show_only_on_due_date,
                 parent_id,
                 subtasks,
                 is_recurring,
-                original_recurring_task_id
+                recurrence_interval,
+                recurrence_end_date,
+                original_recurring_task_id,
+                next_occurrence_date,
+                created_at,
+                completed_at
             ) VALUES (
                 new_task_uuid,
                 recurring_task.title,
+                recurring_task.body,
+                recurring_task.notes,
                 false, -- New instances start as not done
                 recurring_task.next_occurrence_date,
+                recurring_task.show_only_on_due_date,
                 recurring_task.parent_id,
                 recurring_task.subtasks,
                 false, -- Instances are not recurring themselves
-                recurring_task.id
+                NULL, -- keep generated instance as a one-off task; labels drive the visible behaviour
+                recurring_task.recurrence_end_date,
+                recurring_task.id,
+                calculate_next_occurrence(recurring_task.next_occurrence_date, recurring_task.recurrence_interval),
+                NOW(),
+                NULL
             );
 
             -- Copy labels from the recurring task to the new instance

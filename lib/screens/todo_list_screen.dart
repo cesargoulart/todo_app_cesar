@@ -25,6 +25,18 @@ import '../widgets/todo_filter_chips_widget.dart';
 import '../widgets/todo_task_card_widget.dart';
 import '../widgets/note_card_widget.dart';
 
+bool isDailyTaskVisibleInShowAll({
+  required DateTime dueDate,
+  required DateTime now,
+}) {
+  final dueDay = DateTime(dueDate.year, dueDate.month, dueDate.day);
+  final today = DateTime(now.year, now.month, now.day);
+  if (!dueDay.isAtSameMomentAs(today)) return false;
+
+  final visibleFrom = dueDate.subtract(const Duration(hours: 1));
+  return !now.isBefore(visibleFrom);
+}
+
 class ToDoListScreen extends StatefulWidget {
   final Function(ThemeMode) onThemeModeChanged;
 
@@ -242,18 +254,17 @@ class _ToDoListScreenState extends State<ToDoListScreen>
               )
               .toList();
     }
-    // Daily tasks only appear on their due date, starting 1 hour before the
-    // due time, unless the Daily label is explicitly selected.
+    // Daily tasks only appear on their due day, starting 1 hour before the
+    // due time and staying visible for the rest of that day (so an unchecked
+    // task doesn't vanish once its due time passes), unless the Daily label
+    // is explicitly selected.
     if (_filterByLabel == null || !_isDailyLabelName(_filterByLabel!.name)) {
       filtered =
           filtered.where((t) {
             if (!_hasDailyLabel(t.labels)) return true;
             final dueDate = t.dueDate;
             if (dueDate == null) return true;
-            final dueDay = DateTime(dueDate.year, dueDate.month, dueDate.day);
-            if (!dueDay.isAtSameMomentAs(today)) return false;
-            final visibleFrom = dueDate.subtract(const Duration(hours: 1));
-            return !now.isBefore(visibleFrom);
+            return isDailyTaskVisibleInShowAll(dueDate: dueDate, now: now);
           }).toList();
     }
 

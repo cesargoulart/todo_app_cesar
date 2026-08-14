@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gh run *)"
+      "Bash(gh run *)",
+      "mcp__claude_ai_Supabase__query_logs",
+      "Bash(flutter test *)"
     ]
   }
 }
