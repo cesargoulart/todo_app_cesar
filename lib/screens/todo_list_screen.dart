@@ -31,10 +31,20 @@ bool isDailyTaskVisibleInShowAll({
 }) {
   final dueDay = DateTime(dueDate.year, dueDate.month, dueDate.day);
   final today = DateTime(now.year, now.month, now.day);
-  if (!dueDay.isAtSameMomentAs(today)) return false;
 
-  final visibleFrom = dueDate.subtract(const Duration(hours: 1));
-  return !now.isBefore(visibleFrom);
+  // Due day hasn't arrived yet: stay hidden until 1 hour before it.
+  if (dueDay.isAfter(today)) return false;
+
+  // Due today: only visible starting 1 hour before the due time.
+  if (dueDay.isAtSameMomentAs(today)) {
+    final visibleFrom = dueDate.subtract(const Duration(hours: 1));
+    return !now.isBefore(visibleFrom);
+  }
+
+  // Due day already passed and the task is still pending (its due date only
+  // advances when it gets marked done) — keep it visible as overdue, same as
+  // any other unfinished task, instead of silently disappearing.
+  return true;
 }
 
 class ToDoListScreen extends StatefulWidget {

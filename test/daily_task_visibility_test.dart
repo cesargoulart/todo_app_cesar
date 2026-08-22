@@ -24,11 +24,25 @@ void main() {
       expect(isDailyTaskVisibleInShowAll(dueDate: dueDate, now: now), isFalse);
     });
 
-    test('is hidden when due date is on a different day', () {
+    test('is hidden when due date is a future day', () {
+      final dueDate = DateTime(2026, 8, 14, 9, 0);
+      final now = DateTime(2026, 8, 13, 8, 30);
+
+      expect(isDailyTaskVisibleInShowAll(dueDate: dueDate, now: now), isFalse);
+    });
+
+    test('stays visible when overdue (due day already passed and still pending)', () {
       final dueDate = DateTime(2026, 8, 14, 9, 0);
       final now = DateTime(2026, 8, 15, 8, 30);
 
-      expect(isDailyTaskVisibleInShowAll(dueDate: dueDate, now: now), isFalse);
+      expect(isDailyTaskVisibleInShowAll(dueDate: dueDate, now: now), isTrue);
+    });
+
+    test('stays visible when overdue by several days', () {
+      final dueDate = DateTime(2026, 8, 14, 9, 0);
+      final now = DateTime(2026, 8, 22, 12, 0);
+
+      expect(isDailyTaskVisibleInShowAll(dueDate: dueDate, now: now), isTrue);
     });
   });
 }
