@@ -3,6 +3,7 @@
 // Responsável por inicializar todos os serviços antes do app arrancar.
 // Mantém o main.dart limpo.
 
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../supabase_credentials_web.dart'
     if (dart.library.io) '../supabase_credentials.dart';
@@ -14,15 +15,15 @@ class AppInitializer {
   static Future<void> initialize() async {
     try {
       await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnnonKey);
-      print('✅ Supabase initialized');
+      debugPrint('✅ Supabase initialized');
 
       await NotificationService().initialize();
-      print('✅ NotificationService initialized');
+      debugPrint('✅ NotificationService initialized');
 
       await AutoUpdateService().initialize();
-      print('✅ AutoUpdateService initialized');
+      debugPrint('✅ AutoUpdateService initialized');
     } catch (e) {
-      print('❌ Initialization error: $e');
+      debugPrint('❌ Initialization error: $e');
       // App continua mesmo que algum serviço falhe
     }
   }

@@ -38,7 +38,7 @@ class _LabelPickerWidgetState extends State<LabelPickerWidget> {
     try {
       _allLabels = await _labelService.getAllLabels();
     } catch (e) {
-      print('Error loading labels: $e');
+      debugPrint('Error loading labels: $e');
     }
     setState(() => _isLoading = false);
   }
@@ -131,14 +131,16 @@ class _LabelPickerWidgetState extends State<LabelPickerWidget> {
                       try {
                         final newLabel = await _labelService.createLabel(
                           nameController.text,
-                          '#${selectedColor.value.toRadixString(16).substring(2)}',
+                          '#${selectedColor.toARGB32().toRadixString(16).substring(2)}',
                         );
                         await _loadLabels();
+                        if (!context.mounted) return;
                         Navigator.of(context).pop();
 
                         // Auto-select the new label
                         _toggleLabel(newLabel);
                       } catch (e) {
+                        if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(content: Text('Error creating label: $e')),
                         );
@@ -253,8 +255,12 @@ class _LabelPickerWidgetState extends State<LabelPickerWidget> {
                       label: Text(label.name),
                       selected: isSelected,
                       onSelected: (_) => _toggleLabel(label),
-                      backgroundColor: _parseColor(label.color).withValues(alpha: 0.2),
-                      selectedColor: _parseColor(label.color).withValues(alpha: 0.6),
+                      backgroundColor: _parseColor(
+                        label.color,
+                      ).withValues(alpha: 0.2),
+                      selectedColor: _parseColor(
+                        label.color,
+                      ).withValues(alpha: 0.6),
                       checkmarkColor: Colors.white,
                       labelStyle: TextStyle(
                         color: Colors.white,

@@ -1167,6 +1167,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                   ),
                                 );
                                 if (date == null) return;
+                                if (!context.mounted) return;
                                 final time = await showTimePicker(
                                   context: context,
                                   initialTime: TimeOfDay.fromDateTime(
@@ -1229,7 +1230,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                   child: DropdownButtonFormField<
                                     RecurrenceInterval
                                   >(
-                                    value:
+                                    initialValue:
                                         _isMedicoContext(selectedLabels)
                                             ? (_medicoIntervals.contains(
                                                   recurrenceInterval,
@@ -1381,15 +1382,6 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                     'F',
                                     'S',
                                     'S',
-                                  ];
-                                  const fullNames = [
-                                    'Mon',
-                                    'Tue',
-                                    'Wed',
-                                    'Thu',
-                                    'Fri',
-                                    'Sat',
-                                    'Sun',
                                   ];
                                   final day = i + 1;
                                   final isSelected = selectedWeekdays.contains(

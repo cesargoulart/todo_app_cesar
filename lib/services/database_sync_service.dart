@@ -1,6 +1,7 @@
 // lib/services/database_sync_service.dart
 
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import '../models/todo_item.dart';
 import '../config/sync_config.dart';
 import 'supabase_service.dart';
@@ -47,13 +48,13 @@ class DatabaseSyncService {
 
     if (_isInitialized) {
       onDataUpdated?.call(List<ToDoItem>.from(_currentTodos));
-      print('📊 DatabaseSyncService já está inicializado');
+      debugPrint('📊 DatabaseSyncService já está inicializado');
       return;
     }
 
     _isInitialized = true;
 
-    print('🚀 Inicializando DatabaseSyncService...');
+    debugPrint('🚀 Inicializando DatabaseSyncService...');
 
     // Faz a primeira sincronização imediatamente
     await performSync();
@@ -67,7 +68,7 @@ class DatabaseSyncService {
   /// Inicia a sincronização automática
   void startAutoSync() {
     if (!SyncConfig.isAutoSyncEnabled) {
-      print('⚠️ Sincronização automática desabilitada nas configurações');
+      debugPrint('⚠️ Sincronização automática desabilitada nas configurações');
       return;
     }
 
@@ -78,14 +79,16 @@ class DatabaseSyncService {
         performSync(silent: SyncConfig.silentSync);
       } else {
         if (SyncConfig.shouldLog('sync')) {
-          print('⏳ Sincronização adiada - operação do usuário em andamento');
+          debugPrint(
+            '⏳ Sincronização adiada - operação do usuário em andamento',
+          );
         }
         _pendingSyncQueue.add(() => performSync(silent: SyncConfig.silentSync));
       }
     });
 
     if (SyncConfig.shouldLog('sync')) {
-      print(
+      debugPrint(
         '⏰ Sincronização automática iniciada (intervalo: ${SyncConfig.syncIntervalDescription})',
       );
     }
@@ -95,20 +98,20 @@ class DatabaseSyncService {
   void stopAutoSync() {
     _syncTimer?.cancel();
     _syncTimer = null;
-    print('⏹️ Sincronização automática parada');
+    debugPrint('⏹️ Sincronização automática parada');
   }
 
   /// Realiza uma sincronização com a base de dados
   Future<void> performSync({bool silent = false}) async {
     // Evita sincronizações simultâneas
     if (_isSyncing) {
-      print('🔄 Sincronização já em andamento, pulando...');
+      debugPrint('🔄 Sincronização já em andamento, pulando...');
       return;
     }
 
     // Se o usuário estiver operando, adia a sincronização
     if (_isUserOperating) {
-      print('👤 Usuário está operando, adiando sincronização...');
+      debugPrint('👤 Usuário está operando, adiando sincronização...');
       _pendingSyncQueue.add(() => performSync(silent: silent));
       return;
     }
@@ -119,7 +122,7 @@ class DatabaseSyncService {
     final startTime = DateTime.now();
 
     if (!silent && SyncConfig.shouldLog('sync')) {
-      print('🔄 Iniciando sincronização da base de dados...');
+      debugPrint('🔄 Iniciando sincronização da base de dados...');
     }
 
     int retryCount = 0;
@@ -147,10 +150,10 @@ class DatabaseSyncService {
         success = true;
 
         if (!silent && SyncConfig.shouldLog('sync')) {
-          print(
+          debugPrint(
             '✅ Sincronização concluída com sucesso! ${todos.length} tarefas carregadas',
           );
-          print('📅 Última sincronização: ${_lastSyncTime?.toLocal()}');
+          debugPrint('📅 Última sincronização: ${_lastSyncTime?.toLocal()}');
         }
       } catch (e) {
         retryCount++;
@@ -159,7 +162,7 @@ class DatabaseSyncService {
         _statistics.lastFailedSync = DateTime.now();
 
         if (SyncConfig.shouldLog('sync')) {
-          print(
+          debugPrint(
             '❌ Erro na sincronização (tentativa $retryCount/${SyncConfig.maxRetries}): $e',
           );
         }
@@ -169,7 +172,7 @@ class DatabaseSyncService {
           await Future.delayed(SyncConfig.getRetryDelay(retryCount));
         } else {
           if (SyncConfig.shouldLog('sync')) {
-            print(
+            debugPrint(
               '❌ Falha na sincronização após ${SyncConfig.maxRetries} tentativas',
             );
           }
@@ -191,7 +194,7 @@ class DatabaseSyncService {
   void beginUserOperation() {
     _isUserOperating = true;
     if (SyncConfig.debugMode) {
-      print('👤 Operação do usuário iniciada - sincronização pausada');
+      debugPrint('👤 Operação do usuário iniciada - sincronização pausada');
     }
   }
 
@@ -199,7 +202,7 @@ class DatabaseSyncService {
   void endUserOperation() {
     _isUserOperating = false;
     if (SyncConfig.debugMode) {
-      print('👤 Operação do usuário finalizada');
+      debugPrint('👤 Operação do usuário finalizada');
     }
 
     // Sincroniza após operação se configurado
@@ -321,7 +324,7 @@ class DatabaseSyncService {
   /// Força uma sincronização manual
   Future<void> forceSync() async {
     if (SyncConfig.shouldLog('sync')) {
-      print('🔄 Sincronização manual solicitada');
+      debugPrint('🔄 Sincronização manual solicitada');
     }
     await performSync(silent: false);
   }
@@ -338,7 +341,7 @@ class DatabaseSyncService {
       }
 
       if (SyncConfig.debugMode) {
-        print(
+        debugPrint(
           '📋 Processando ${_pendingSyncQueue.length} sincronizações pendentes',
         );
       }
@@ -359,7 +362,7 @@ class DatabaseSyncService {
       }
 
       if (SyncConfig.debugMode) {
-        print(
+        debugPrint(
           '📋 Processando ${_pendingUserOperations.length} operações do usuário pendentes',
         );
       }

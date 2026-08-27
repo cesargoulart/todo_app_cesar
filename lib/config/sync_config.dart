@@ -1,123 +1,123 @@
 // lib/config/sync_config.dart
 
+import 'package:flutter/foundation.dart';
+
 /// Configurações para o serviço de sincronização da base de dados
 class SyncConfig {
   // ==========================================
   // CONFIGURAÇÕES DE TEMPO
   // ==========================================
-  
+
   /// Intervalo entre sincronizações automáticas
   /// Padrão: 1 minuto
   /// Recomendado: Entre 30 segundos e 5 minutos
   static const Duration syncInterval = Duration(minutes: 1);
-  
+
   /// Tempo de delay entre tentativas de sincronização após falha
   /// O delay aumenta progressivamente: tentativa * baseRetryDelay
   static const Duration baseRetryDelay = Duration(seconds: 2);
-  
+
   /// Tempo máximo de espera para uma operação de sincronização
   static const Duration syncTimeout = Duration(seconds: 30);
-  
+
   // ==========================================
   // CONFIGURAÇÕES DE RETRY
   // ==========================================
-  
+
   /// Número máximo de tentativas em caso de falha
   /// Padrão: 3 tentativas
   static const int maxRetries = 3;
-  
+
   /// Habilitar retry automático em caso de falha
   static const bool enableAutoRetry = true;
-  
+
   // ==========================================
   // CONFIGURAÇÕES DE COMPORTAMENTO
   // ==========================================
-  
+
   /// Iniciar sincronização automática ao abrir o app
   static const bool startSyncOnInit = false;
-  
+
   /// Fazer sincronização silenciosa (sem logs)
   static const bool silentSync = false;
-  
+
   /// Sincronizar automaticamente após operações do usuário
   /// Se true, sincroniza após cada operação de escrita
   /// Se false, aguarda sincronização manual
   static const bool syncAfterUserOperation = false;
-  
+
   /// Mostrar notificação quando sincronização falhar
   static const bool showSyncErrorNotification = true;
-  
+
   // ==========================================
   // CONFIGURAÇÕES DE UI
   // ==========================================
-  
+
   /// Mostrar indicador de sincronização na UI
   static const bool showSyncIndicator = true;
-  
+
   /// Mostrar tempo desde última sincronização
   static const bool showLastSyncTime = true;
-  
+
   /// Habilitar pull-to-refresh para sincronização manual
   static const bool enablePullToRefresh = true;
-  
+
   /// Mostrar botão de sincronização manual na AppBar
   static const bool showManualSyncButton = true;
-  
+
   // ==========================================
   // CONFIGURAÇÕES DE CACHE
   // ==========================================
-  
+
   /// Manter cache local dos dados
   static const bool enableLocalCache = true;
-  
+
   /// Tamanho máximo do cache de operações pendentes
   static const int maxPendingOperations = 100;
-  
+
   // ==========================================
   // CONFIGURAÇÕES DE DEBUG
   // ==========================================
-  
+
   /// Habilitar modo debug com logs detalhados
   static const bool debugMode = true;
-  
+
   /// Mostrar menu de debug na UI
   static const bool showDebugMenu = true;
-  
+
   /// Logar todas as operações de sincronização
   static const bool logSyncOperations = true;
-  
+
   // ==========================================
   // CONFIGURAÇÕES DE PERFORMANCE
   // ==========================================
-  
+
   /// Número máximo de tarefas para processar por vez
   static const int batchSize = 50;
-  
+
   /// Habilitar otimização de batching para múltiplas operações
   static const bool enableBatching = true;
-  
+
   // ==========================================
   // MÉTODOS AUXILIARES
   // ==========================================
-  
+
   /// Verifica se deve fazer log baseado nas configurações
   static bool shouldLog(String message) {
     if (silentSync && !debugMode) return false;
     if (!logSyncOperations && message.contains('sync')) return false;
     return true;
   }
-  
+
   /// Calcula o delay para retry baseado no número da tentativa
   static Duration getRetryDelay(int attemptNumber) {
-    return Duration(
-      seconds: baseRetryDelay.inSeconds * attemptNumber
-    );
+    return Duration(seconds: baseRetryDelay.inSeconds * attemptNumber);
   }
-  
+
   /// Verifica se a sincronização automática está habilitada
-  static bool get isAutoSyncEnabled => 
-    startSyncOnInit && syncInterval.inSeconds > 0;
-  
+  static bool get isAutoSyncEnabled =>
+      startSyncOnInit && syncInterval.inSeconds > 0;
+
   /// Obtém a descrição do intervalo de sincronização
   static String get syncIntervalDescription {
     if (syncInterval.inDays > 0) {
@@ -130,27 +130,27 @@ class SyncConfig {
       return '${syncInterval.inSeconds} segundo(s)';
     }
   }
-  
+
   /// Valida as configurações
   static bool validateConfig() {
     if (syncInterval.inSeconds < 10) {
-      print('⚠️ Aviso: Intervalo de sincronização muito curto (< 10s)');
+      debugPrint('⚠️ Aviso: Intervalo de sincronização muito curto (< 10s)');
       return false;
     }
-    
+
     if (maxRetries > 10) {
-      print('⚠️ Aviso: Número de tentativas muito alto (> 10)');
+      debugPrint('⚠️ Aviso: Número de tentativas muito alto (> 10)');
       return false;
     }
-    
+
     if (batchSize < 1) {
-      print('❌ Erro: Tamanho do batch inválido (< 1)');
+      debugPrint('❌ Erro: Tamanho do batch inválido (< 1)');
       return false;
     }
-    
+
     return true;
   }
-  
+
   /// Obtém um resumo das configurações atuais
   static Map<String, dynamic> getConfigSummary() {
     return {
@@ -167,7 +167,7 @@ class SyncConfig {
         'showLastSyncTime': showLastSyncTime,
         'pullToRefresh': enablePullToRefresh,
         'manualSyncButton': showManualSyncButton,
-      }
+      },
     };
   }
 }
@@ -180,15 +180,17 @@ class SyncStatistics {
   DateTime? lastSuccessfulSync;
   DateTime? lastFailedSync;
   Duration totalSyncTime = Duration.zero;
-  
-  double get successRate => 
-    totalOperations > 0 ? successfulSyncs / totalOperations : 0.0;
-  
-  Duration get averageSyncTime => 
-    successfulSyncs > 0 
-      ? Duration(milliseconds: totalSyncTime.inMilliseconds ~/ successfulSyncs)
-      : Duration.zero;
-  
+
+  double get successRate =>
+      totalOperations > 0 ? successfulSyncs / totalOperations : 0.0;
+
+  Duration get averageSyncTime =>
+      successfulSyncs > 0
+          ? Duration(
+            milliseconds: totalSyncTime.inMilliseconds ~/ successfulSyncs,
+          )
+          : Duration.zero;
+
   Map<String, dynamic> toJson() {
     return {
       'successful': successfulSyncs,

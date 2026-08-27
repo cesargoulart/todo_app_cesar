@@ -1,5 +1,6 @@
 // lib/services/label_service.dart
 
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/label.dart';
 
@@ -26,7 +27,7 @@ class LabelService {
           .map((json) => Label.fromJson(json as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      print('Error loading labels: $e');
+      debugPrint('Error loading labels: $e');
       return [];
     }
   }
@@ -43,7 +44,7 @@ class LabelService {
 
       return Label.fromJson(response);
     } catch (e) {
-      print('Error creating label: $e');
+      debugPrint('Error creating label: $e');
       rethrow;
     }
   }
@@ -61,7 +62,7 @@ class LabelService {
 
       return Label.fromJson(response);
     } catch (e) {
-      print('Error updating label: $e');
+      debugPrint('Error updating label: $e');
       rethrow;
     }
   }
@@ -71,7 +72,7 @@ class LabelService {
     try {
       await _client.from(_labelsTable).delete().eq('id', labelId);
     } catch (e) {
-      print('Error deleting label: $e');
+      debugPrint('Error deleting label: $e');
       rethrow;
     }
   }
@@ -84,7 +85,7 @@ class LabelService {
         'label_id': labelId,
       });
     } catch (e) {
-      print('Error adding label to task: $e');
+      debugPrint('Error adding label to task: $e');
       rethrow;
     }
   }
@@ -98,7 +99,7 @@ class LabelService {
           .eq('task_id', taskId)
           .eq('label_id', labelId);
     } catch (e) {
-      print('Error removing label from task: $e');
+      debugPrint('Error removing label from task: $e');
       rethrow;
     }
   }
@@ -128,7 +129,7 @@ class LabelService {
           )
           .toList();
     } catch (e) {
-      print('Error getting labels for task: $e');
+      debugPrint('Error getting labels for task: $e');
       return [];
     }
   }

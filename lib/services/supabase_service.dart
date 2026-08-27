@@ -1,5 +1,6 @@
 // lib/services/supabase_service.dart
 
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/todo_item.dart';
 import 'label_service.dart';
@@ -69,7 +70,7 @@ class SupabaseService {
 
       return topLevel;
     } catch (e) {
-      print('Error loading todos: $e');
+      debugPrint('Error loading todos: $e');
       return [];
     }
   }
@@ -79,7 +80,7 @@ class SupabaseService {
     try {
       await _client.rpc('generate_recurring_task_instances');
     } catch (e) {
-      print('Error generating recurring task instances: $e');
+      debugPrint('Error generating recurring task instances: $e');
       // Don't rethrow - this shouldn't break the app if it fails
     }
   } // Save a single todo to Supabase
@@ -97,19 +98,17 @@ class SupabaseService {
       if (todo.isRecurring &&
           todo.dueDate != null &&
           todo.recurrenceInterval != RecurrenceInterval.none) {
-        if (todo.nextOccurrenceDate == null) {
-          todo.nextOccurrenceDate = todo.calculateNextOccurrence();
-        }
+        todo.nextOccurrenceDate ??= todo.calculateNextOccurrence();
         todoJson['next_occurrence_date'] =
             todo.nextOccurrenceDate?.toIso8601String();
 
         // Debug logging
-        print('Saving recurring task:');
-        print('  isRecurring: ${todo.isRecurring}');
-        print('  recurrenceInterval: ${todo.recurrenceInterval.value}');
-        print('  dueDate: ${todo.dueDate}');
-        print('  nextOccurrenceDate: ${todo.nextOccurrenceDate}');
-        print(
+        debugPrint('Saving recurring task:');
+        debugPrint('  isRecurring: ${todo.isRecurring}');
+        debugPrint('  recurrenceInterval: ${todo.recurrenceInterval.value}');
+        debugPrint('  dueDate: ${todo.dueDate}');
+        debugPrint('  nextOccurrenceDate: ${todo.nextOccurrenceDate}');
+        debugPrint(
           '  todoJson next_occurrence_date: ${todoJson['next_occurrence_date']}',
         );
       }
@@ -130,12 +129,14 @@ class SupabaseService {
           }
         }
       } catch (notifError) {
-        print('Warning: Notification update failed after save: $notifError');
+        debugPrint(
+          'Warning: Notification update failed after save: $notifError',
+        );
       }
 
       return savedTodo;
     } catch (e) {
-      print('Error saving todo: $e');
+      debugPrint('Error saving todo: $e');
       rethrow;
     }
   } // Save multiple todos to Supabase
@@ -164,7 +165,7 @@ class SupabaseService {
           .map((json) => ToDoItem.fromJson(json as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      print('Error saving todos: $e');
+      debugPrint('Error saving todos: $e');
       rethrow;
     }
   }
@@ -177,7 +178,7 @@ class SupabaseService {
       try {
         await _notificationService.cancelTaskNotifications(id);
       } catch (notifError) {
-        print(
+        debugPrint(
           'Warning: Could not cancel notifications during deletion: $notifError',
         );
         // Continue with deletion even if notification cancellation fails
@@ -185,7 +186,7 @@ class SupabaseService {
 
       await _client.from(_tableName).delete().eq('id', id);
     } catch (e) {
-      print('Error deleting todo: $e');
+      debugPrint('Error deleting todo: $e');
       rethrow;
     }
   }
@@ -216,11 +217,13 @@ class SupabaseService {
           }
         }
       } catch (notifError) {
-        print('Warning: Notification error during status update: $notifError');
+        debugPrint(
+          'Warning: Notification error during status update: $notifError',
+        );
         // Continue - status update was successful even if notifications failed
       }
     } catch (e) {
-      print('Error updating todo status: $e');
+      debugPrint('Error updating todo status: $e');
       rethrow;
     }
   }
@@ -242,7 +245,7 @@ class SupabaseService {
       // Update the parent in the database with the new subtasks
       await saveTodo(parentTodo);
     } catch (e) {
-      print('Error adding subtask: $e');
+      debugPrint('Error adding subtask: $e');
       rethrow;
     }
   }
@@ -259,7 +262,7 @@ class SupabaseService {
       // Update the parent in the database
       await saveTodo(parentTodo);
     } catch (e) {
-      print('Error removing subtask: $e');
+      debugPrint('Error removing subtask: $e');
       rethrow;
     }
   }
@@ -281,7 +284,7 @@ class SupabaseService {
           .map((json) => ToDoItem.fromJson(json as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      print('Error getting recurring task instances: $e');
+      debugPrint('Error getting recurring task instances: $e');
       return [];
     }
   }
@@ -303,7 +306,7 @@ class SupabaseService {
       // Delete the original recurring task
       await _client.from(_tableName).delete().eq('id', id);
     } catch (e) {
-      print('Error deleting recurring task: $e');
+      debugPrint('Error deleting recurring task: $e');
       rethrow;
     }
   }
@@ -330,7 +333,7 @@ class SupabaseService {
 
       return ToDoItem.fromJson(response);
     } catch (e) {
-      print('Error updating recurring task: $e');
+      debugPrint('Error updating recurring task: $e');
       rethrow;
     }
   }
@@ -343,7 +346,7 @@ class SupabaseService {
 
       return ToDoItem.fromJson(response);
     } catch (e) {
-      print('Error getting task by ID: $e');
+      debugPrint('Error getting task by ID: $e');
       return null;
     }
   }
@@ -385,7 +388,7 @@ class SupabaseService {
         );
       }
     } catch (e) {
-      print('Error scheduling notifications for task: $e');
+      debugPrint('Error scheduling notifications for task: $e');
       // Don't rethrow - notification errors shouldn't break the app
     }
   }
@@ -396,7 +399,7 @@ class SupabaseService {
       final todos = await loadTodos();
       await _notificationService.rescheduleNotificationsForTasks(todos);
     } catch (e) {
-      print('Error rescheduling notifications: $e');
+      debugPrint('Error rescheduling notifications: $e');
     }
   }
 }

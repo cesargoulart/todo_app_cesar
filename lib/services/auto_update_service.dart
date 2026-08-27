@@ -13,17 +13,21 @@ class AutoUpdateService {
   AutoUpdateService._internal();
 
   final Dio _dio = Dio();
-  
+
   // Google Drive configuration
-  static const String _versionFileUrl = 'https://drive.google.com/uc?export=download&id=YOUR_VERSION_FILE_ID';
-  static const String _apkBaseUrl = 'https://drive.google.com/uc?export=download&id=';
-  
+  static const String _versionFileUrl =
+      'https://drive.google.com/uc?export=download&id=YOUR_VERSION_FILE_ID';
+  static const String _apkBaseUrl =
+      'https://drive.google.com/uc?export=download&id=';
+
   // Update configuration
   static const String _versionPrefsKey = 'last_update_check';
-  static const Duration _checkInterval = Duration(hours: 6); // Check every 6 hours
+  static const Duration _checkInterval = Duration(
+    hours: 6,
+  ); // Check every 6 hours
 
   Future<void> initialize() async {
-    print('🔄 AutoUpdateService initialized');
+    debugPrint('🔄 AutoUpdateService initialized');
     // Check for updates on app start (with rate limiting)
     await _checkForUpdatesWithRateLimit();
   }
@@ -33,30 +37,30 @@ class AutoUpdateService {
       final prefs = await SharedPreferences.getInstance();
       final lastCheck = prefs.getInt(_versionPrefsKey) ?? 0;
       final now = DateTime.now().millisecondsSinceEpoch;
-      
+
       // Only check if enough time has passed
       if (now - lastCheck > _checkInterval.inMilliseconds) {
         await checkForUpdates(showNoUpdateDialog: false);
         await prefs.setInt(_versionPrefsKey, now);
       }
     } catch (e) {
-      print('❌ Error in rate-limited update check: $e');
+      debugPrint('❌ Error in rate-limited update check: $e');
     }
   }
 
   Future<void> checkForUpdates({bool showNoUpdateDialog = true}) async {
     try {
-      print('🔍 Checking for app updates...');
-      
+      debugPrint('🔍 Checking for app updates...');
+
       // Get current app version
       final packageInfo = await PackageInfo.fromPlatform();
       final currentVersion = packageInfo.version;
-      print('📱 Current app version: $currentVersion');
+      debugPrint('📱 Current app version: $currentVersion');
 
       // Get latest version from Google Drive
       final latestVersionInfo = await _getLatestVersionInfo();
       if (latestVersionInfo == null) {
-        print('❌ Could not fetch version information');
+        debugPrint('❌ Could not fetch version information');
         return;
       }
 
@@ -64,20 +68,25 @@ class AutoUpdateService {
       final apkFileId = latestVersionInfo['apk_file_id'] as String;
       final changelog = latestVersionInfo['changelog'] as String?;
 
-      print('☁️ Latest version available: $latestVersion');
+      debugPrint('☁️ Latest version available: $latestVersion');
 
       // Compare versions
       if (_isNewerVersion(currentVersion, latestVersion)) {
-        print('🆕 New version available: $latestVersion');
-        await _showUpdateDialog(currentVersion, latestVersion, apkFileId, changelog);
+        debugPrint('🆕 New version available: $latestVersion');
+        await _showUpdateDialog(
+          currentVersion,
+          latestVersion,
+          apkFileId,
+          changelog,
+        );
       } else {
-        print('✅ App is up to date');
+        debugPrint('✅ App is up to date');
         if (showNoUpdateDialog) {
           await _showNoUpdateDialog();
         }
       }
     } catch (e) {
-      print('❌ Error checking for updates: $e');
+      debugPrint('❌ Error checking for updates: $e');
     }
   }
 
@@ -85,24 +94,42 @@ class AutoUpdateService {
     try {
       final response = await _dio.get(_versionFileUrl);
       final versionData = response.data as String;
-      
+
       // Parse version file (JSON format)
       // Expected format: {"version": "1.0.1", "apk_file_id": "GOOGLE_DRIVE_APK_FILE_ID", "changelog": "Bug fixes"}
       final lines = versionData.trim().split('\n');
-      final versionLine = lines.firstWhere((line) => line.contains('version'), orElse: () => '');
-      final apkIdLine = lines.firstWhere((line) => line.contains('apk_file_id'), orElse: () => '');
-      final changelogLine = lines.firstWhere((line) => line.contains('changelog'), orElse: () => '');
+      final versionLine = lines.firstWhere(
+        (line) => line.contains('version'),
+        orElse: () => '',
+      );
+      final apkIdLine = lines.firstWhere(
+        (line) => line.contains('apk_file_id'),
+        orElse: () => '',
+      );
+      final changelogLine = lines.firstWhere(
+        (line) => line.contains('changelog'),
+        orElse: () => '',
+      );
 
       if (versionLine.isEmpty || apkIdLine.isEmpty) {
         return null;
       }
 
       // Simple parsing (you can use json.decode for proper JSON)
-      final version = versionLine.split(':')[1].trim().replaceAll('"', '').replaceAll(',', '');
-      final apkFileId = apkIdLine.split(':')[1].trim().replaceAll('"', '').replaceAll(',', '');
-      final changelog = changelogLine.isNotEmpty 
-          ? changelogLine.split(':')[1].trim().replaceAll('"', '') 
-          : 'No changelog available';
+      final version = versionLine
+          .split(':')[1]
+          .trim()
+          .replaceAll('"', '')
+          .replaceAll(',', '');
+      final apkFileId = apkIdLine
+          .split(':')[1]
+          .trim()
+          .replaceAll('"', '')
+          .replaceAll(',', '');
+      final changelog =
+          changelogLine.isNotEmpty
+              ? changelogLine.split(':')[1].trim().replaceAll('"', '')
+              : 'No changelog available';
 
       return {
         'version': version,
@@ -110,7 +137,7 @@ class AutoUpdateService {
         'changelog': changelog,
       };
     } catch (e) {
-      print('❌ Error fetching version info: $e');
+      debugPrint('❌ Error fetching version info: $e');
       return null;
     }
   }
@@ -126,7 +153,12 @@ class AutoUpdateService {
     return latest.length > current.length;
   }
 
-  Future<void> _showUpdateDialog(String currentVersion, String latestVersion, String apkFileId, String? changelog) async {
+  Future<void> _showUpdateDialog(
+    String currentVersion,
+    String latestVersion,
+    String apkFileId,
+    String? changelog,
+  ) async {
     final context = _getContext();
     if (context == null) return;
 
@@ -147,11 +179,16 @@ class AutoUpdateService {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Current Version: $currentVersion'),
-              Text('Latest Version: $latestVersion', 
-                   style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(
+                'Latest Version: $latestVersion',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 16),
               if (changelog != null) ...[
-                const Text('What\'s New:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text(
+                  'What\'s New:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 8),
                 Text(changelog),
                 const SizedBox(height: 16),
@@ -204,19 +241,22 @@ class AutoUpdateService {
     );
   }
 
-  Future<void> _downloadAndInstallUpdate(String apkFileId, String version) async {
+  Future<void> _downloadAndInstallUpdate(
+    String apkFileId,
+    String version,
+  ) async {
     try {
       // Request permissions
       final hasPermission = await _requestPermissions();
       if (!hasPermission) {
-        print('❌ Storage permissions not granted');
+        debugPrint('❌ Storage permissions not granted');
         return;
       }
 
       // Show download progress dialog
       await _showDownloadDialog(apkFileId, version);
     } catch (e) {
-      print('❌ Error downloading update: $e');
+      debugPrint('❌ Error downloading update: $e');
     }
   }
 
@@ -233,7 +273,8 @@ class AutoUpdateService {
     final context = _getContext();
     if (context == null) return;
 
-    return showDialog<void>(
+    // Fire-and-forget so we can kick off the download right after showing the dialog.
+    showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
@@ -258,7 +299,7 @@ class AutoUpdateService {
     );
 
     // Start download in background
-    _performDownload(apkFileId, version);
+    await _performDownload(apkFileId, version);
   }
 
   Future<void> _performDownload(String apkFileId, String version) async {
@@ -278,20 +319,21 @@ class AutoUpdateService {
         onReceiveProgress: (received, total) {
           if (total != -1) {
             final progress = (received / total * 100).toStringAsFixed(1);
-            print('📥 Download progress: $progress%');
+            debugPrint('📥 Download progress: $progress%');
           }
         },
       );
 
       // Close download dialog
+      if (!context.mounted) return;
       Navigator.of(context).pop();
 
       // Show install dialog
       await _showInstallDialog(downloadPath);
     } catch (e) {
-      print('❌ Download failed: $e');
+      debugPrint('❌ Download failed: $e');
       final context = _getContext();
-      if (context != null) {
+      if (context != null && context.mounted) {
         Navigator.of(context).pop();
         _showErrorDialog('Download failed. Please try again.');
       }
@@ -307,7 +349,9 @@ class AutoUpdateService {
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Install Update'),
-          content: const Text('Update downloaded successfully! Tap "Install" to install the new version.'),
+          content: const Text(
+            'Update downloaded successfully! Tap "Install" to install the new version.',
+          ),
           actions: [
             TextButton(
               child: const Text('Cancel'),
@@ -330,12 +374,12 @@ class AutoUpdateService {
     try {
       final result = await OpenFile.open(apkPath);
       if (result.type == ResultType.done) {
-        print('✅ APK installation initiated');
+        debugPrint('✅ APK installation initiated');
       } else {
-        print('❌ Failed to open APK: ${result.message}');
+        debugPrint('❌ Failed to open APK: ${result.message}');
       }
     } catch (e) {
-      print('❌ Error installing APK: $e');
+      debugPrint('❌ Error installing APK: $e');
     }
   }
 
@@ -368,7 +412,7 @@ class AutoUpdateService {
 
   // Manual update check method for UI button
   Future<void> manualUpdateCheck() async {
-    print('🔍 Manual update check initiated');
+    debugPrint('🔍 Manual update check initiated');
     await checkForUpdates(showNoUpdateDialog: true);
   }
 }
