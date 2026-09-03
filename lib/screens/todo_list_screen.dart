@@ -610,7 +610,7 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                 ),
                 onPressed: () => Navigator.of(ctx).pop(),
               ),
-              if (todo.isRecurring) ...[
+              if (todo.isRecurring || todo.isRecurringInstance) ...[
                 TextButton(
                   child: const Text(
                     'THIS ONLY',
@@ -635,17 +635,24 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                     style: TextStyle(color: AppColors.accentRed),
                   ),
                   onPressed: () async {
-                    if (todo.id != null) {
+                    // For a generated instance, the recurring series is rooted
+                    // at its original task; deleting only the instance lets the
+                    // database re-create it on the next sync.
+                    final seriesId =
+                        todo.isRecurring
+                            ? todo.id
+                            : todo.originalRecurringTaskId;
+                    if (seriesId != null) {
                       await _syncService.wrapUserOperation(() async {
                         await _supabaseService.deleteRecurringTask(
-                          todo.id!,
+                          seriesId,
                           deleteInstances: true,
                         );
                         setState(
                           () => _todos.removeWhere(
                             (t) =>
-                                t.id == todo.id ||
-                                t.originalRecurringTaskId == todo.id,
+                                t.id == seriesId ||
+                                t.originalRecurringTaskId == seriesId,
                           ),
                         );
                       });

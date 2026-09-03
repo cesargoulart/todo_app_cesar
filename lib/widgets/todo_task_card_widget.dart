@@ -101,6 +101,17 @@ class _TodoTaskCardWidgetState extends State<TodoTaskCardWidget>
       widget.todo.dueDate!.isBefore(DateTime.now()) &&
       !widget.todo.isDone;
 
+  // Due on the current calendar day — highlighted in orange rather than the
+  // red used for genuinely overdue (past-day) tasks.
+  bool get _isDueToday {
+    final due = widget.todo.dueDate;
+    if (due == null || widget.todo.isDone) return false;
+    final now = DateTime.now();
+    return due.year == now.year &&
+        due.month == now.month &&
+        due.day == now.day;
+  }
+
   bool get _hasSubtasks => widget.todo.subtasks.isNotEmpty;
 
   double get _completionPct => widget.todo.completionPercentage;
@@ -240,9 +251,11 @@ class _TodoTaskCardWidgetState extends State<TodoTaskCardWidget>
                               style: widget.todo.isDone
                                   ? AppTextStyles.taskTitleDone
                                   : AppTextStyles.taskTitle.copyWith(
-                                      color: _isOverdue
-                                          ? AppColors.accentRed
-                                          : AppColors.textPrimary,
+                                      color: _isDueToday
+                                          ? AppColors.accentOrange
+                                          : _isOverdue
+                                              ? AppColors.accentRed
+                                              : AppColors.textPrimary,
                                     ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -361,9 +374,11 @@ class _TodoTaskCardWidgetState extends State<TodoTaskCardWidget>
                                 Icon(
                                   Icons.access_time_rounded,
                                   size: 12,
-                                  color: _isOverdue
-                                      ? AppColors.accentRed
-                                      : AppColors.textMuted,
+                                  color: _isDueToday
+                                      ? AppColors.accentOrange
+                                      : _isOverdue
+                                          ? AppColors.accentRed
+                                          : AppColors.textMuted,
                                 ),
                                 const SizedBox(width: 3),
                                 Text(
@@ -371,9 +386,11 @@ class _TodoTaskCardWidgetState extends State<TodoTaskCardWidget>
                                       .format(widget.todo.dueDate!),
                                   style: AppTextStyles.timeText
                                       .copyWith(
-                                    color: _isOverdue
-                                        ? AppColors.accentRed
-                                        : AppColors.textMuted,
+                                    color: _isDueToday
+                                        ? AppColors.accentOrange
+                                        : _isOverdue
+                                            ? AppColors.accentRed
+                                            : AppColors.textMuted,
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
                                   ),
