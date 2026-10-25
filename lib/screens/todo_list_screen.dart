@@ -281,13 +281,21 @@ class _ToDoListScreenState extends State<ToDoListScreen>
     // Toggle between only-open and only-completed tasks
     filtered = filtered.where((t) => t.isDone == _showCompleted).toList();
 
-    // Hide future tasks (>3 days)
+    // Hide future tasks: Trabalho appears 15 minutes before its due time;
+    // other tasks keep the 3-day window.
     if (_hideFutureTasks) {
       final threeDays = now.add(const Duration(days: 3));
+      final fifteenMinutes = now.add(const Duration(minutes: 15));
       filtered =
-          filtered
-              .where((t) => t.dueDate == null || t.dueDate!.isBefore(threeDays))
-              .toList();
+          filtered.where((t) {
+            final dueDate = t.dueDate;
+            if (dueDate == null) return true;
+            final isTrabalhoTask = t.labels.any(
+              (label) => _normalizeLabelName(label.name) == 'trabalho',
+            );
+            if (isTrabalhoTask) return !dueDate.isAfter(fifteenMinutes);
+            return dueDate.isBefore(threeDays);
+          }).toList();
     }
 
     // Show only on due date
@@ -697,6 +705,8 @@ class _ToDoListScreenState extends State<ToDoListScreen>
         (isEditing ? null : DateTime.now().add(const Duration(hours: 1)));
     bool showOnlyOnDueDate = existingTodo?.showOnlyOnDueDate ?? false;
     bool isRecurring = existingTodo?.isRecurring ?? false;
+    // Guards against a double tap on SAVE/ADD inserting the task twice.
+    bool isSaving = false;
     RecurrenceInterval recurrenceInterval =
         existingTodo?.recurrenceInterval ?? RecurrenceInterval.none;
     DateTime? recurrenceEndDate = existingTodo?.recurrenceEndDate;
@@ -765,8 +775,11 @@ class _ToDoListScreenState extends State<ToDoListScreen>
                                       ),
                                     ),
                                     onPressed: () async {
+                                      if (isSaving) return;
+                                      isSaving = true;
                                       final newTitle =
                                           _textFieldController.text.trim();
+                                      if (newTitle.isEmpty) isSaving = false;
                                       if (newTitle.isNotEmpty) {
                                         try {
                                           if (isEditing) {

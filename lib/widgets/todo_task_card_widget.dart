@@ -443,7 +443,8 @@ class _TodoTaskCardWidgetState extends State<TodoTaskCardWidget>
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        // Indentada para o checkbox da subtarefa alinhar com o título da tarefa
+        padding: const EdgeInsets.fromLTRB(64, 0, 16, 12),
         child: Column(
           children: widget.todo.subtasks.asMap().entries.map((entry) {
             final idx = entry.key;
