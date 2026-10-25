@@ -443,34 +443,25 @@ class _TodoTaskCardWidgetState extends State<TodoTaskCardWidget>
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
       child: Padding(
-        // Linha-guia alinhada com o centro do checkbox da tarefa principal
+        // Começa por baixo do centro do checkbox da tarefa principal
         // (16 padding + 22 chevron + 12 metade do checkbox ≈ 49)
         padding: const EdgeInsets.fromLTRB(49, 0, 16, 12),
-        child: Container(
-          decoration: const BoxDecoration(
-            border: Border(
-              left: BorderSide(color: AppColors.borderCard, width: 2),
-            ),
-          ),
-          // Recuo tipo parágrafo: a subtarefa começa à direita do título
-          padding: const EdgeInsets.only(left: 24),
-          child: Column(
-            children: widget.todo.subtasks.asMap().entries.map((entry) {
-              final idx = entry.key;
-              final subtask = entry.value;
-              return TodoSubtaskRowWidget(
-                key: ValueKey(subtask.id ?? subtask.title),
-                subtask: subtask,
-                index: idx,
-                onToggle: () =>
-                    widget.onSubtaskStatusChanged?.call(widget.todo, subtask),
-                onEdit: () =>
-                    widget.onSubtaskEdit?.call(widget.todo, subtask),
-                onDelete: () =>
-                    widget.onSubtaskDeleted?.call(widget.todo, subtask),
-              );
-            }).toList(),
-          ),
+        child: Column(
+          children: widget.todo.subtasks.asMap().entries.map((entry) {
+            final idx = entry.key;
+            final subtask = entry.value;
+            return TodoSubtaskRowWidget(
+              key: ValueKey(subtask.id ?? subtask.title),
+              subtask: subtask,
+              index: idx,
+              onToggle: () =>
+                  widget.onSubtaskStatusChanged?.call(widget.todo, subtask),
+              onEdit: () =>
+                  widget.onSubtaskEdit?.call(widget.todo, subtask),
+              onDelete: () =>
+                  widget.onSubtaskDeleted?.call(widget.todo, subtask),
+            );
+          }).toList(),
         ),
       ),
     );
